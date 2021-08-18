@@ -51,6 +51,7 @@
         <module>driver-cockroachdb</module>
         <module>driver-pulsar</module>
         <module>driver-jms</module>
+        <module>driver-stargate-grpc</module>
 
         <!-- VIRTDATA MODULES -->
 

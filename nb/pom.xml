@@ -119,6 +119,12 @@
 
         <dependency>
             <groupId>io.nosqlbench</groupId>
+            <artifactId>driver-stargate-grpc</artifactId>
+            <version>4.15.48-SNAPSHOT</version>
+        </dependency>
+
+        <dependency>
+            <groupId>io.nosqlbench</groupId>
             <artifactId>driver-mongodb</artifactId>
             <version>4.15.48-SNAPSHOT</version>
         </dependency>
