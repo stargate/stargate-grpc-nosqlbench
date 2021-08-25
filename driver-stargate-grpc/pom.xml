@@ -47,7 +47,7 @@
         <dependency>
             <groupId>io.stargate.grpc</groupId>
             <artifactId>grpc-proto</artifactId>
-            <version>1.0.32-SNAPSHOT</version>
+            <version>1.0.31</version>
         </dependency>
 
         <dependency>
