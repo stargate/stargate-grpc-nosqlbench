@@ -3,9 +3,9 @@ description: An IOT workload with more optimal settings for DSE
 
 scenarios:
   default:
-    schema: run driver=stargate-grpc token=<<auth_token:my_default_token>> tags==phase:schema threads==1 cycles==UNDEF
-    rampup: run driver=stargate-grpc token=<<auth_token:my_default_token>> tags==phase:rampup cycles===TEMPLATE(rampup-cycles,10000000) threads=auto
-    main: run driver=stargate-grpc token=<<auth_token:my_default_token>> tags==phase:main cycles===TEMPLATE(main-cycles,10000000) threads=auto
+    schema: run driver=stargate-grpc auth_token=<<auth_token:my_default_token>> tags==phase:schema threads==1 cycles==UNDEF
+    rampup: run driver=stargate-grpc auth_token=<<auth_token:my_default_token>> tags==phase:rampup cycles===TEMPLATE(rampup-cycles,10000000) threads=auto
+    main: run driver=stargate-grpc auth_token=<<auth_token:my_default_token>> tags==phase:main cycles===TEMPLATE(main-cycles,10000000) threads=auto
 
 bindings:
   machine_id: Mod(<<sources:10000>>); ToHashedUUID() -> java.util.UUID
