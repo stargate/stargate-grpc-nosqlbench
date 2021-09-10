@@ -4,7 +4,7 @@
   <parent>
     <groupId>io.nosqlbench</groupId>
     <artifactId>mvn-defaults</artifactId>
-    <version>4.15.48-SNAPSHOT</version>
+    <version>4.15.52-SNAPSHOT</version>
     <relativePath>../mvn-defaults</relativePath>
   </parent>
 
@@ -23,19 +23,25 @@
     <dependency>
       <groupId>io.nosqlbench</groupId>
       <artifactId>engine-api</artifactId>
-        <version>4.15.48-SNAPSHOT</version>
+        <version>4.15.52-SNAPSHOT</version>
     </dependency>
 
     <dependency>
       <groupId>io.nosqlbench</groupId>
       <artifactId>drivers-api</artifactId>
-        <version>4.15.48-SNAPSHOT</version>
+        <version>4.15.52-SNAPSHOT</version>
     </dependency>
 
     <dependency>
       <groupId>com.datastax.dse</groupId>
       <artifactId>dse-java-driver-graph</artifactId>
       <version>1.9.0</version>
+        <exclusions>
+            <exclusion>
+                <groupId>org.slf4j</groupId>
+                <artifactId>jcl-over-slf4j</artifactId>
+            </exclusion>
+        </exclusions>
     </dependency>
 
     <dependency>
@@ -70,7 +76,6 @@
     <dependency>
       <groupId>org.antlr</groupId>
       <artifactId>antlr4-runtime</artifactId>
-      <version>4.8</version>
     </dependency>
 
     <!--        <dependency>-->
@@ -174,7 +179,6 @@
       <plugin>
         <groupId>org.antlr</groupId>
         <artifactId>antlr4-maven-plugin</artifactId>
-        <version>4.8</version>
         <configuration>
           <sourceDirectory>src/main/grammars/cql3
           </sourceDirectory>
