@@ -3,7 +3,7 @@
 
   <groupId>io.nosqlbench</groupId>
   <artifactId>mvn-defaults</artifactId>
-  <version>4.15.48-SNAPSHOT</version>
+  <version>4.15.52-SNAPSHOT</version>
   <packaging>pom</packaging>
 
   <properties>
@@ -13,8 +13,9 @@
 
     <!-- properties for package versions -->
     <ascii.data.version>1.2.0</ascii.data.version>
+    <antlr4.version>4.9.2</antlr4.version>
     <commons.codec.version>1.14</commons.codec.version>
-    <commons.compress.version>1.20</commons.compress.version>
+    <commons.compress.version>1.21</commons.compress.version>
     <commons.csv.version>1.8</commons.csv.version>
     <commons.lang.version>3.9</commons.lang.version>
     <commons.math3.version>3.6.1</commons.math3.version>
@@ -27,7 +28,7 @@
     <jaxb.impl.version>2.4.0-b180830.0438</jaxb.impl.version>
     <jmh.version>1.22</jmh.version>
     <joda.time.version>2.9.9</joda.time.version>
-    <junit.jupiter.version>5.3.2</junit.jupiter.version>
+    <junit.jupiter.version>5.7.2</junit.jupiter.version>
 
     <lz4.version>1.4.1</lz4.version>
 <!--    <metrics.version>4.0.7</metrics.version>-->
@@ -37,7 +38,7 @@
     <!--        <netty.version>4.1.31.Final</netty.version>-->
     <number.to.words.version>1.0.0</number.to.words.version>
     <!--        <slf4j.version>1.7.29</slf4j.version>-->
-    <snakeyaml.version>1.23</snakeyaml.version>
+    <snakeyaml.version>1.26</snakeyaml.version>
     <snappy.version>1.1.2.6</snappy.version>
 
     <!-- plugin versions -->
@@ -88,7 +89,7 @@
 
       <dependency>
         <groupId>org.junit.jupiter</groupId>
-        <version>5.6.2</version>
+        <version>${junit.jupiter.version}</version>
         <artifactId>junit-jupiter</artifactId>
         <scope>test</scope>
       </dependency>
@@ -183,24 +184,50 @@
         <groupId>com.github.docker-java</groupId>
         <artifactId>docker-java-api</artifactId>
         <version>${docker.java.version}</version>
+          <exclusions>
+              <exclusion>
+                  <groupId>org.slf4j</groupId>
+                  <artifactId>jcl-over-slf4j</artifactId>
+              </exclusion>
+          </exclusions>
       </dependency>
 
       <dependency>
         <groupId>com.github.docker-java</groupId>
         <artifactId>docker-java-core</artifactId>
         <version>${docker.java.version}</version>
+          <exclusions>
+              <exclusion>
+                  <groupId>org.slf4j</groupId>
+                  <artifactId>jcl-over-slf4j</artifactId>
+              </exclusion>
+          </exclusions>
       </dependency>
 
       <dependency>
         <groupId>com.github.docker-java</groupId>
         <artifactId>docker-java-transport-okhttp</artifactId>
         <version>${docker.java.version}</version>
+          <exclusions>
+              <exclusion>
+                  <groupId>org.slf4j</groupId>
+                  <artifactId>jcl-over-slf4j</artifactId>
+              </exclusion>
+          </exclusions>
+
       </dependency>
 
       <dependency>
         <groupId>com.github.docker-java</groupId>
         <artifactId>docker-java</artifactId>
         <version>${docker.java.version}</version>
+          <exclusions>
+              <exclusion>
+                  <groupId>org.slf4j</groupId>
+                  <artifactId>jcl-over-slf4j</artifactId>
+              </exclusion>
+          </exclusions>
+
       </dependency>
 
       <dependency>
@@ -208,7 +235,6 @@
         <artifactId>oshi-core</artifactId>
         <version>5.2.2</version>
       </dependency>
-
 
       <dependency>
         <groupId>com.google.code.gson</groupId>
@@ -271,7 +297,7 @@
       <dependency>
         <groupId>org.antlr</groupId>
         <artifactId>antlr4-runtime</artifactId>
-        <version>4.8</version>
+        <version>${antlr4.version}</version>
       </dependency>
 
       <dependency>
@@ -354,31 +380,20 @@
     <dependency>
       <groupId>org.assertj</groupId>
       <artifactId>assertj-core</artifactId>
-      <version>3.15.0</version>
+      <version>3.19.0</version>
       <scope>test</scope>
     </dependency>
 
     <dependency>
       <groupId>org.junit.platform</groupId>
       <artifactId>junit-platform-launcher</artifactId>
-      <version>1.6.2</version>
+      <version>1.7.2</version>
       <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
-      <version>5.6.2</version>
-    </dependency>
-    <dependency>
-      <groupId>org.junit.jupiter</groupId>
-      <artifactId>junit-jupiter-engine</artifactId>
-      <version>5.6.2</version>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.junit.vintage</groupId>
-      <artifactId>junit-vintage-engine</artifactId>
-      <version>5.6.2</version>
+      <version>${junit.jupiter.version}</version>
       <scope>test</scope>
     </dependency>
 
@@ -559,7 +574,7 @@
         <plugin>
           <groupId>org.antlr</groupId>
           <artifactId>antlr4-maven-plugin</artifactId>
-          <version>4.8</version>
+          <version>${antlr4.version}</version>
         </plugin>
         <plugin>
           <groupId>org.codehaus.mojo</groupId>
