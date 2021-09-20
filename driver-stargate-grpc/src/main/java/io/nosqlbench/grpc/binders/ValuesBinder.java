@@ -262,7 +262,7 @@ public class ValuesBinder implements ValuesArrayBinder<Object, Payload> {
         public Value encode(Object value) {
             Map<?, ?> map = (Map<?, ?>) value;
 
-            // map is stored as a list of altering k,v
+            // map is stored as a list of alternating k,v
             // For example, for a Map([1,"a"], [2,"b"]) it becomes a List(1,"a",2,"b")
             List<Value> values =
                 map.entrySet().stream()
