@@ -2,12 +2,18 @@ package io.nosqlbench.grpc.binders;
 
 import com.google.protobuf.Any;
 import io.nosqlbench.virtdata.core.bindings.ValuesArrayBinder;
+import io.stargate.proto.QueryOuterClass;
 import io.stargate.proto.QueryOuterClass.Payload;
 import io.stargate.proto.QueryOuterClass.Value;
 import io.stargate.proto.QueryOuterClass.Values;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.Date;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class ValuesBinder implements ValuesArrayBinder<Object, Payload> {
 
@@ -38,6 +44,8 @@ public class ValuesBinder implements ValuesArrayBinder<Object, Payload> {
         UUIDCodec.instance,
         DateCodec.instance,
         TimestampCodec.instance,
+        CollectionCodec.instance,
+        MapCodec.instance
     };
 
     public static Value fromObject(Object value) {
@@ -216,6 +224,55 @@ public class ValuesBinder implements ValuesArrayBinder<Object, Payload> {
         @Override
         public Value encode(Object value) {
             return io.stargate.grpc.Values.of(((Date)value).getTime());
+        }
+    }
+
+    @SuppressWarnings("rawtypes")
+    public static class CollectionCodec extends Codec<Collection>{
+
+        public static final CollectionCodec instance = new CollectionCodec();
+
+        public CollectionCodec() {
+            super(Collection.class);
+        }
+
+        @Override
+        public Value encode(Object value) {
+
+            Collection<?> values = (Collection<?>) value;
+            QueryOuterClass.Collection.Builder builder = QueryOuterClass.Collection.newBuilder();
+            for (Object o : values) {
+                builder.addElements(fromObject(o));
+            }
+
+            return Value.newBuilder().setCollection(builder).build();
+        }
+    }
+
+    @SuppressWarnings("rawtypes")
+    public static class MapCodec extends Codec<Map>{
+
+        public static final MapCodec instance = new MapCodec();
+
+        public MapCodec() {
+            super(Map.class);
+        }
+
+        @Override
+        public Value encode(Object value) {
+            Map<?, ?> map = (Map<?, ?>) value;
+
+            // map is stored as a list of alternating k,v
+            // For example, for a Map([1,"a"], [2,"b"]) it becomes a List(1,"a",2,"b")
+            List<Value> values =
+                map.entrySet().stream()
+                    .flatMap(v -> Stream.of(v.getKey(), v.getValue()))
+                    .map(ValuesBinder::fromObject)
+                    .collect(Collectors.toList());
+
+            return Value.newBuilder()
+                .setCollection(QueryOuterClass.Collection.newBuilder().addAllElements(values).build())
+                .build();
         }
     }
 
