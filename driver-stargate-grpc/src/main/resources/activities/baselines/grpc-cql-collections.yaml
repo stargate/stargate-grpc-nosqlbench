@@ -33,13 +33,13 @@ bindings:
   errorNotificationTimestamp: ToString(); Unset();
   fdpProfileId: StartingEpochMillis('2020-04-01 23:59:59'); ToString();
   fingerprint: ToString(); Unset();
-  intuitConsentId: ToString(); Unset();
+  consentId: ToString(); Unset();
   lastAttemptTime: ToString(); Unset();
   lastModifiedBy: StartingEpochMillis('2020-04-01 23:59:59'); ToString();
   lastSuccessTime: ToString(); Unset();
   nickName: ToString(); Unset();
-  originatingOfferingId: WeightedStrings('mint.intuit.com:1'); ToString();
-  participatingOfferingIds: Set(HashRange(1,2), WeightedStrings('mint.intuit.com:1'));
+  originatingOfferingId: WeightedStrings('example.com:1'); ToString();
+  participatingOfferingIds: Set(HashRange(1,2), WeightedStrings('example.com:1'));
 #  originatingOfferingId: Combinations('1-9;1-9;1-9'); ToString();
 #  participatingOfferingIds: Set(HashRange(1,2), Combinations('1-9;1-9;1-9'));
   status: >
@@ -83,7 +83,7 @@ blocks:
        "errorNotificationTimestamp" timestamp,
        "fdpProfileId" text,
        fingerprint text,
-       "intuitConsentId" text,
+       "consentId" text,
        "lastAttemptTime" timestamp,
        "lastModifiedBy" text,
        "lastModifiedTime" timestamp,
@@ -122,7 +122,7 @@ blocks:
        credentials list<text>,
        "errorNotificationTimestamp" timestamp,
        fingerprint text,
-       "intuitConsentId" text,
+       "consentId" text,
        "lastAttemptTime" timestamp,
        "lastModifiedBy" text,
        "lastModifiedTime" timestamp,
@@ -175,7 +175,7 @@ blocks:
        credentials list<text>,
        "errorNotificationTimestamp" timestamp,
        fingerprint text,
-       "intuitConsentId" text,
+       "consentId" text,
        "lastAttemptTime" timestamp,
        "lastModifiedBy" text,
        "lastModifiedTime" timestamp,
@@ -202,7 +202,7 @@ blocks:
       INSERT INTO <<keyspace:baselines>>."providerCredentialStatus" ("providerId", "credentialSetIdMod5", "errorCode", "statusChangeTime", "fdpProfileId", "credentialSetId") VALUES ({providerId}, {credentialSetIdMod5}, {errorCode}, {statusChangeTime}, {fdpProfileId}, {credentialSetId});
 
   - write-credentialSetByProvider: |
-      INSERT INTO <<keyspace:baselines>>."credentialSetByProvider" ("providerId", "credentialSetIdMod100", "credentialSetId", "additionalInfo", "alternateIds", "bankConsent", "bankConsentId", "channelId", compliance, "createdBy", "createdTime", credentials, "errorNotificationTimestamp", "fdpProfileId", fingerprint, "intuitConsentId", "lastAttemptTime", "lastModifiedBy", "lastModifiedTime", "lastSuccessTime", "nickName", "originatingOfferingId", "participatingOfferingIds", status) VALUES ({providerId}, {credentialSetIdMod100}, {credentialSetId}, {additionalInfo}, {alternateIds}, {bankConsent}, {bankConsentId}, {channelId}, {compliance}, {createdBy}, {createdTime}, {credentials}, {errorNotificationTimestamp}, {fdpProfileId}, {fingerprint}, {intuitConsentId}, {lastAttemptTime}, {lastModifiedBy}, {lastModifiedTime}, {lastSuccessTime}, {nickName}, {originatingOfferingId}, {participatingOfferingIds}, {status});
+      INSERT INTO <<keyspace:baselines>>."credentialSetByProvider" ("providerId", "credentialSetIdMod100", "credentialSetId", "additionalInfo", "alternateIds", "bankConsent", "bankConsentId", "channelId", compliance, "createdBy", "createdTime", credentials, "errorNotificationTimestamp", "fdpProfileId", fingerprint, "consentId", "lastAttemptTime", "lastModifiedBy", "lastModifiedTime", "lastSuccessTime", "nickName", "originatingOfferingId", "participatingOfferingIds", status) VALUES ({providerId}, {credentialSetIdMod100}, {credentialSetId}, {additionalInfo}, {alternateIds}, {bankConsent}, {bankConsentId}, {channelId}, {compliance}, {createdBy}, {createdTime}, {credentials}, {errorNotificationTimestamp}, {fdpProfileId}, {fingerprint}, {consentId}, {lastAttemptTime}, {lastModifiedBy}, {lastModifiedTime}, {lastSuccessTime}, {nickName}, {originatingOfferingId}, {participatingOfferingIds}, {status});
   - write-maskedCredentialSet: |
       INSERT INTO <<keyspace:baselines>>."maskedCredentialSet" (
        "fdpProfileId",
@@ -219,7 +219,7 @@ blocks:
        credentials ,
        "errorNotificationTimestamp",
        fingerprint ,
-       "intuitConsentId" ,
+       "consentId" ,
        "lastAttemptTime" ,
        "lastModifiedBy" ,
        "lastModifiedTime" ,
@@ -245,7 +245,7 @@ blocks:
        {credentials} ,
        {errorNotificationTimestamp},
        {fingerprint} ,
-       {intuitConsentId} ,
+       {consentId} ,
        {lastAttemptTime} ,
        {lastModifiedBy} ,
        {lastModifiedTime} ,
@@ -316,7 +316,7 @@ blocks:
        credentials,
        "errorNotificationTimestamp",
        fingerprint,
-       "intuitConsentId",
+       "consentId",
        "lastAttemptTime",
        "lastModifiedBy",
        "lastModifiedTime",
@@ -341,7 +341,7 @@ blocks:
        {credentials} ,
        {errorNotificationTimestamp},
        {fingerprint} ,
-       {intuitConsentId} ,
+       {consentId} ,
        {lastAttemptTime} ,
        {lastModifiedBy} ,
        {lastModifiedTime} ,
@@ -369,7 +369,7 @@ blocks:
       INSERT INTO <<keyspace:baselines>>."providerCredentialStatus" ("providerId", "credentialSetIdMod5", "errorCode", "statusChangeTime", "fdpProfileId", "credentialSetId") VALUES ({providerId}, {credentialSetIdMod5}, {errorCode}, {statusChangeTime}, {fdpProfileId}, {credentialSetId});
 
   - write-credentialSetByProvider: |
-      INSERT INTO <<keyspace:baselines>>."credentialSetByProvider" ("providerId", "credentialSetIdMod100", "credentialSetId", "additionalInfo", "alternateIds", "bankConsent", "bankConsentId", "channelId", compliance, "createdBy", "createdTime", credentials, "errorNotificationTimestamp", "fdpProfileId", fingerprint, "intuitConsentId", "lastAttemptTime", "lastModifiedBy", "lastModifiedTime", "lastSuccessTime", "nickName", "originatingOfferingId", "participatingOfferingIds", status) VALUES ({providerId}, {credentialSetIdMod100}, {credentialSetId}, {additionalInfo}, {alternateIds}, {bankConsent}, {bankConsentId}, {channelId}, {compliance}, {createdBy}, {createdTime}, {credentials}, {errorNotificationTimestamp}, {fdpProfileId}, {fingerprint}, {intuitConsentId}, {lastAttemptTime}, {lastModifiedBy}, {lastModifiedTime}, {lastSuccessTime}, {nickName}, {originatingOfferingId}, {participatingOfferingIds}, {status});
+      INSERT INTO <<keyspace:baselines>>."credentialSetByProvider" ("providerId", "credentialSetIdMod100", "credentialSetId", "additionalInfo", "alternateIds", "bankConsent", "bankConsentId", "channelId", compliance, "createdBy", "createdTime", credentials, "errorNotificationTimestamp", "fdpProfileId", fingerprint, "consentId", "lastAttemptTime", "lastModifiedBy", "lastModifiedTime", "lastSuccessTime", "nickName", "originatingOfferingId", "participatingOfferingIds", status) VALUES ({providerId}, {credentialSetIdMod100}, {credentialSetId}, {additionalInfo}, {alternateIds}, {bankConsent}, {bankConsentId}, {channelId}, {compliance}, {createdBy}, {createdTime}, {credentials}, {errorNotificationTimestamp}, {fdpProfileId}, {fingerprint}, {consentId}, {lastAttemptTime}, {lastModifiedBy}, {lastModifiedTime}, {lastSuccessTime}, {nickName}, {originatingOfferingId}, {participatingOfferingIds}, {status});
   - write-maskedCredentialSet: |
       INSERT INTO <<keyspace:baselines>>."maskedCredentialSet" (
        "fdpProfileId",
@@ -386,7 +386,7 @@ blocks:
        credentials ,
        "errorNotificationTimestamp",
        fingerprint ,
-       "intuitConsentId" ,
+       "consentId" ,
        "lastAttemptTime" ,
        "lastModifiedBy" ,
        "lastModifiedTime" ,
@@ -412,7 +412,7 @@ blocks:
        {credentials} ,
        {errorNotificationTimestamp},
        {fingerprint} ,
-       {intuitConsentId} ,
+       {consentId} ,
        {lastAttemptTime} ,
        {lastModifiedBy} ,
        {lastModifiedTime} ,
@@ -483,7 +483,7 @@ blocks:
        credentials,
        "errorNotificationTimestamp",
        fingerprint,
-       "intuitConsentId",
+       "consentId",
        "lastAttemptTime",
        "lastModifiedBy",
        "lastModifiedTime",
@@ -508,7 +508,7 @@ blocks:
        {credentials} ,
        {errorNotificationTimestamp},
        {fingerprint} ,
-       {intuitConsentId} ,
+       {consentId} ,
        {lastAttemptTime} ,
        {lastModifiedBy} ,
        {lastModifiedTime} ,
