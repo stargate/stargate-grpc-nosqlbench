@@ -1,4 +1,5 @@
 scenarios:
+  default:
     schema: run driver=stargate-grpc auth_token=<<auth_token:my_default_token>> tags==phase:schema threads==1 cycles==UNDEF
     rampup: run driver=stargate-grpc auth_token=<<auth_token:my_default_token>> tags==phase:rampup cycles===TEMPLATE(rampup-cycles,10000000) threads=1000
     main: run driver=stargate-grpc auth_token=<<auth_token:my_default_token>> tags==phase:main cycles===TEMPLATE(main-cycles,10000000) threads=1000
