@@ -12,18 +12,35 @@ import io.nosqlbench.engine.api.activityimpl.ActivityDef;
 import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 public class StubCache<S extends AbstractStub<S>> implements Shutdownable {
     private final static Logger logger = LogManager.getLogger(StubCache.class);
 
-    Map<String, S> entries = Maps.newConcurrentMap();
+    Map<Integer, S> entries = Maps.newConcurrentMap();
+    AtomicInteger counter = new AtomicInteger();
 
-    public S get(ActivityDef def, Function<ManagedChannel, S> construct) {
-        String key = def.getParams().getOptionalString("clusterid").orElse("default");
-        return entries.computeIfAbsent(key, (k) -> build(def, construct));
+    /**
+     * @return the AbstractStub in a round-robin fashion
+     */
+    public S get() {
+        int numberOfEntries = entries.size();
+        int index = (counter.getAndUpdate(value -> (value + 1) % numberOfEntries));
+        return entries.get(index);
+    }
+
+    /**
+     * Initializes N number of StargateGrpc clients, each with a dedicated channel.
+     * @param numberOfConcurrentClients number of clients to initialize.
+     */
+    public void build(ActivityDef def, Function<ManagedChannel, S> construct, int numberOfConcurrentClients) {
+        for(int i = 0; i < numberOfConcurrentClients; i++){
+            entries.computeIfAbsent(i, (k) -> build(def, construct));
+        }
     }
 
     private S build(ActivityDef def, Function<ManagedChannel, S> construct) {
@@ -36,6 +53,7 @@ public class StubCache<S extends AbstractStub<S>> implements Shutdownable {
         ManagedChannel channel =
             ManagedChannelBuilder.forAddress(host, port)
                 .usePlaintext() // TODO support SSL
+                .directExecutor()
                 .build();
 
         return construct.apply(channel).withCallCredentials(new StargateBearerToken(token));

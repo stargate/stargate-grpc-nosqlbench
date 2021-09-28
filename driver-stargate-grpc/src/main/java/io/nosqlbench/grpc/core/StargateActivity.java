@@ -1,14 +1,5 @@
 package io.nosqlbench.grpc.core;
 
-import com.datastax.driver.core.ConsistencyLevel;
-import io.grpc.CallCredentials;
-import io.grpc.CallCredentials.MetadataApplier;
-import io.grpc.CallCredentials.RequestInfo;
-import io.grpc.ManagedChannel;
-import io.grpc.ManagedChannelBuilder;
-import io.grpc.Metadata;
-import io.grpc.Status;
-import io.nosqlbench.activitytype.cql.core.CqlActivity;
 import io.nosqlbench.activitytype.cql.statements.core.AvailableCQLStatements;
 import io.nosqlbench.activitytype.cql.statements.core.CQLStatementDef;
 import io.nosqlbench.activitytype.cql.statements.core.TaggedCQLStatementDefs;
@@ -65,8 +56,10 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
     private long retryDelay;
     private long maxRetryDelay;
     private long requestDeadlineMs;
+    private Integer numberOfConcurrentClients;
 
     private static final StubCache<StargateFutureStub> stubCache = new StubCache<>();
+
 
     public StargateActivity(ActivityDef activityDef) {
         super(activityDef);
@@ -74,7 +67,7 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
     }
 
     public StargateFutureStub getStub() {
-        return stubCache.get(activityDef, StargateGrpc::newFutureStub);
+        return stubCache.get();
     }
 
     @Override
@@ -160,6 +153,13 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
         this.retryDelay = params.getOptionalLong("retrydelay").orElse(0L);
         this.maxRetryDelay = params.getOptionalLong("maxretrydelay").orElse(500L);
         this.requestDeadlineMs = params.getOptionalLong("requestdeadline").orElse(5000L); // 5 seconds
+        this.numberOfConcurrentClients = params.getOptionalInteger("number_of_concurrent_clients").orElse(1);
+
+        initializeGrpcStubs(numberOfConcurrentClients);
+    }
+
+    private void initializeGrpcStubs(Integer numberOfConcurrentClients) {
+        stubCache.build(activityDef, StargateGrpc::newFutureStub, numberOfConcurrentClients);
     }
 
     public int getMaxPages() {
