@@ -53,6 +53,7 @@ public class StubCache<S extends AbstractStub<S>> implements Shutdownable {
         ManagedChannel channel =
             ManagedChannelBuilder.forAddress(host, port)
                 .usePlaintext() // TODO support SSL
+                .directExecutor()
                 .build();
 
         return construct.apply(channel).withCallCredentials(new StargateBearerToken(token));

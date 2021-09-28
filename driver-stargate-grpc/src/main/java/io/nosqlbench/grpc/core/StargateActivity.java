@@ -1,14 +1,5 @@
 package io.nosqlbench.grpc.core;
 
-import com.datastax.driver.core.ConsistencyLevel;
-import io.grpc.CallCredentials;
-import io.grpc.CallCredentials.MetadataApplier;
-import io.grpc.CallCredentials.RequestInfo;
-import io.grpc.ManagedChannel;
-import io.grpc.ManagedChannelBuilder;
-import io.grpc.Metadata;
-import io.grpc.Status;
-import io.nosqlbench.activitytype.cql.core.CqlActivity;
 import io.nosqlbench.activitytype.cql.statements.core.AvailableCQLStatements;
 import io.nosqlbench.activitytype.cql.statements.core.CQLStatementDef;
 import io.nosqlbench.activitytype.cql.statements.core.TaggedCQLStatementDefs;
