@@ -1,8 +1,7 @@
 scenarios:
-  default:
-   schema: run driver=stargate-grpc tags==phase:schema
-   rampup: run driver=stargate-grpc tags==phase:rampup cycles=1000000 threads=1000
-   main: run driver=stargate-grpc tags==phase:main cycles=1000000 threads=1000
+    schema: run driver=stargate-grpc auth_token=<<auth_token:my_default_token>> tags==phase:schema threads==1 cycles==UNDEF
+    rampup: run driver=stargate-grpc auth_token=<<auth_token:my_default_token>> tags==phase:rampup cycles===TEMPLATE(rampup-cycles,10000000) threads=1000
+    main: run driver=stargate-grpc auth_token=<<auth_token:my_default_token>> tags==phase:main cycles===TEMPLATE(main-cycles,10000000) threads=1000
 bindings:
   profileId: Add(1); Hash(); ToString();
   credentialSetId: Mod(<<credentialSet:100>>); Identity(); Add(1000L); ToHashedUUID(); ToString();
