@@ -1,0 +1,565 @@
+scenarios:
+  default:
+    schema: run driver=cql tags==phase:schema threads==1 cycles==UNDEF
+    rampup: run driver=cql tags==phase:rampup cycles===TEMPLATE(rampup-cycles,10000000) threads=auto
+    main: run driver=cql tags==phase:main cycles===TEMPLATE(main-cycles,10000000) threads=auto
+bindings:
+  profileId: Add(1); Hash(); ToString();
+  credentialSetId: Mod(<<credentialSet:100>>); Identity(); Add(1000L); ToHashedUUID(); ToString();
+  consentType: WeightedStrings('TAX_PERSIST_CRED:1');
+  consentStatus: WeightedStrings('CONSENTED:1');
+  createdTime: StartingEpochMillis('2020-04-01 23:59:59'); AddHashRange(0L, 31536000000L); ToDate();
+  lastModifiedTime: StartingEpochMillis('2020-04-01 23:59:59'); ToDate();
+  providerId: Mod(<<providerId:100>>); ToHashedUUID(); ToString();
+  credentialSetIdMod5: Identity(); Mod(5); ToInt();
+  errorCode: Combinations('1-9;1-9;1-9');
+  statusChangeTime: StartingEpochMillis('2020-04-01 23:59:59'); ToDate();
+  credentialSetIdMod100: Combinations('1-9;1-9'); Mod(100); ToString();
+  additionalInfo: Map(WeightedStrings('profileType:1'), WeightedStrings('user:1,enterprise:1'), WeightedStrings('type:1'), WeightedStrings('Raw:1'));
+  alternateIds: ToString(); Unset();
+  bankConsent: ToString(); Unset();
+  bankConsentId: ToString(); Unset();
+  channelId: Hash(); ToHashedUUID(); ToString();
+  compliance: >
+     Map(Template("{}", WeightedStrings('7216:1')), Template("{\"is{}\":\"{}\"}", WeightedStrings('7216:1'),WeightedStrings('false:1')));
+#  compliance: >
+#     Template("{'{}': '{\"is{}\":\"{}\"}'}", WeightedStrings('7216:1'),WeightedStrings('7216:1'),WeightedStrings('false:1'));
+  createdBy: StartingEpochMillis('2020-04-01 23:59:59'); ToString();
+  createdTime: StartingEpochMillis('2020-04-01 23:59:59'); ToDate();
+  version: StartingEpochMillis('2020-05-01 23:59:59'); ToDate();
+  credentials: >
+     ListFunctions(NumberNameToString(),NumberNameToString());
+
+  errorNotificationTimestamp: ToString(); Unset();
+  fdpProfileId: StartingEpochMillis('2020-04-01 23:59:59'); ToString();
+  fingerprint: ToString(); Unset();
+  consentId: ToString(); Unset();
+  lastAttemptTime: ToString(); Unset();
+  lastModifiedBy: StartingEpochMillis('2020-04-01 23:59:59'); ToString();
+  lastSuccessTime: ToString(); Unset();
+  nickName: ToString(); Unset();
+  originatingOfferingId: WeightedStrings('example.com:1'); ToString();
+  participatingOfferingIds: Set(HashRange(1,2), WeightedStrings('example.com:1'));
+#  originatingOfferingId: Combinations('1-9;1-9;1-9'); ToString();
+#  participatingOfferingIds: Set(HashRange(1,2), Combinations('1-9;1-9;1-9'));
+  status: >
+     Template("{\\n \"code\" : \"{}\",\\n \"message\" : {},\\n \"retry\" : {},\\n \"providerMessage\" : {}\\n}", WeightedStrings('103:1'), WeightedStrings('null:1'), WeightedStrings('false:1'), WeightedStrings('null:1'));
+
+blocks:
+- tags:
+    phase: schema
+  statements:
+  - create-keyspace: |
+       create keyspace if not exists <<keyspace:baselines>>
+       WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '<<rf:1>>'}
+       AND durable_writes = true;
+    tags:
+        name: create-keyspace
+  - create-consent-table: |
+      create TABLE IF NOT EXISTS <<keyspace:baselines>>.consent (
+       "profileId" text,
+       "credentialSetId" text,
+       "consentType" text,
+       "consentStatus" text,
+       "createdTime" timestamp,
+       "lastModifiedTime" timestamp,
+       PRIMARY KEY ("profileId", "credentialSetId", "consentType")
+       ) WITH CLUSTERING ORDER BY ("credentialSetId" ASC, "consentType" ASC);
+
+  - create-credentialSetByProvider-table: |
+      create TABLE IF NOT EXISTS <<keyspace:baselines>>."credentialSetByProvider" (
+       "providerId" text,
+       "credentialSetIdMod100" text,
+       "credentialSetId" text,
+       "additionalInfo" map<text, text>,
+       "alternateIds" set<text>,
+       "bankConsent" text,
+       "bankConsentId" text,
+       "channelId" text,
+       compliance map<text, text>,
+       "createdBy" text,
+       "createdTime" timestamp,
+       credentials list<text>,
+       "errorNotificationTimestamp" timestamp,
+       "fdpProfileId" text,
+       fingerprint text,
+       "consentId" text,
+       "lastAttemptTime" timestamp,
+       "lastModifiedBy" text,
+       "lastModifiedTime" timestamp,
+       "lastSuccessTime" timestamp,
+       "nickName" text,
+       "originatingOfferingId" text,
+       "participatingOfferingIds" set<text>,
+       status text,
+       PRIMARY KEY (("providerId", "credentialSetIdMod100"), "credentialSetId")
+       ) WITH CLUSTERING ORDER BY ("credentialSetId" ASC);
+
+  - create-providerCredentialStatus-table: |
+      create TABLE IF NOT EXISTS <<keyspace:baselines>>."providerCredentialStatus" (
+       "providerId" text,
+       "credentialSetIdMod5" int,
+       "errorCode" text,
+       "statusChangeTime" timestamp,
+       "fdpProfileId" text,
+       "credentialSetId" text,
+       PRIMARY KEY (("providerId", "credentialSetIdMod5"), "errorCode", "statusChangeTime", "fdpProfileId", "credentialSetId")
+       ) WITH CLUSTERING ORDER BY ("errorCode" ASC, "statusChangeTime" ASC, "fdpProfileId" ASC, "credentialSetId" ASC);
+
+  - create-maskedCredentialSet-table: |
+      create TABLE IF NOT EXISTS <<keyspace:baselines>>."maskedCredentialSet" (
+       "fdpProfileId" text,
+       "credentialSetId" text,
+       "additionalInfo" map<text, text>,
+       "alternateIds" set<text>,
+       "bankConsent" text,
+       "bankConsentId" text,
+       "channelId" text,
+       compliance map<text, text>,
+       "createdBy" text,
+       "createdTime" timestamp,
+       "credentialSetIdMod100" text,
+       credentials list<text>,
+       "errorNotificationTimestamp" timestamp,
+       fingerprint text,
+       "consentId" text,
+       "lastAttemptTime" timestamp,
+       "lastModifiedBy" text,
+       "lastModifiedTime" timestamp,
+       "lastSuccessTime" timestamp,
+       "nickName" text,
+       "originatingOfferingId" text,
+       "participatingOfferingIds" set<text>,
+       "providerId" text,
+       status text,
+       PRIMARY KEY ("fdpProfileId", "credentialSetId")
+       ) WITH CLUSTERING ORDER BY ("credentialSetId" ASC);
+
+  - create-credentialHistory-table: |
+      create TABLE IF NOT EXISTS <<keyspace:baselines>>."credentialHistory" (
+       "fdpProfileId" text,
+       "credentialSetId" text,
+       version timestamp,
+       "additionalInfo" map<text, text>,
+       "alternateIds" set<text>,
+       "channelId" text,
+       compliance map<text, text>,
+       "createdTime" timestamp,
+       credentials list<text>,
+       "errorNotificationTimestamp" timestamp,
+       fingerprint text,
+       "lastAttemptTime" timestamp,
+       "lastModifiedTime" timestamp,
+       "lastSuccessTime" timestamp,
+       "nickName" text,
+       "originatingOfferingId" text,
+       "participatingOfferingIds" set<text>,
+       "providerId" text,
+       status text,
+       PRIMARY KEY ("fdpProfileId", "credentialSetId", version)
+       ) WITH CLUSTERING ORDER BY ("credentialSetId" ASC, version ASC);
+
+  - create-credentialSet-table: |
+      create TABLE IF NOT EXISTS <<keyspace:baselines>>."credentialSet" (
+       "fdpProfileId" text,
+       "credentialSetId" text,
+       "additionalInfo" map<text, text>,
+       "alternateIds" set<text>,
+       "bankConsent" text,
+       "bankConsentId" text,
+       "channelId" text,
+       compliance map<text, text>,
+       "createdBy" text,
+       "createdTime" timestamp,
+       "credentialSetIdMod100" text,
+       credentials list<text>,
+       "errorNotificationTimestamp" timestamp,
+       fingerprint text,
+       "consentId" text,
+       "lastAttemptTime" timestamp,
+       "lastModifiedBy" text,
+       "lastModifiedTime" timestamp,
+       "lastSuccessTime" timestamp,
+       "nickName" text,
+       "originatingOfferingId" text,
+       "participatingOfferingIds" set<text>,
+       "providerId" text,
+       status text,
+       PRIMARY KEY ("fdpProfileId", "credentialSetId")
+       ) WITH CLUSTERING ORDER BY ("credentialSetId" ASC);
+
+- tags:
+    phase: rampup
+  params:
+    prepared: true
+    instrument: true
+    cl: <<write_cl:LOCAL_QUORUM>>
+    ratio: <<write_ratio:1>>
+  statements:
+  - write-consent: |
+      INSERT INTO <<keyspace:baselines>>.consent ("profileId", "credentialSetId", "consentType", "consentStatus", "createdTime", "lastModifiedTime") VALUES ({profileId}, {credentialSetId}, {consentType}, {consentStatus}, {createdTime}, {lastModifiedTime});
+  - write-providerCredentialStatus: |
+      INSERT INTO <<keyspace:baselines>>."providerCredentialStatus" ("providerId", "credentialSetIdMod5", "errorCode", "statusChangeTime", "fdpProfileId", "credentialSetId") VALUES ({providerId}, {credentialSetIdMod5}, {errorCode}, {statusChangeTime}, {fdpProfileId}, {credentialSetId});
+
+  - write-credentialSetByProvider: |
+      INSERT INTO <<keyspace:baselines>>."credentialSetByProvider" ("providerId", "credentialSetIdMod100", "credentialSetId", "additionalInfo", "alternateIds", "bankConsent", "bankConsentId", "channelId", compliance, "createdBy", "createdTime", credentials, "errorNotificationTimestamp", "fdpProfileId", fingerprint, "consentId", "lastAttemptTime", "lastModifiedBy", "lastModifiedTime", "lastSuccessTime", "nickName", "originatingOfferingId", "participatingOfferingIds", status) VALUES ({providerId}, {credentialSetIdMod100}, {credentialSetId}, {additionalInfo}, {alternateIds}, {bankConsent}, {bankConsentId}, {channelId}, {compliance}, {createdBy}, {createdTime}, {credentials}, {errorNotificationTimestamp}, {fdpProfileId}, {fingerprint}, {consentId}, {lastAttemptTime}, {lastModifiedBy}, {lastModifiedTime}, {lastSuccessTime}, {nickName}, {originatingOfferingId}, {participatingOfferingIds}, {status});
+  - write-maskedCredentialSet: |
+      INSERT INTO <<keyspace:baselines>>."maskedCredentialSet" (
+       "fdpProfileId",
+       "credentialSetId",
+       "additionalInfo",
+       "alternateIds",
+       "bankConsent" ,
+       "bankConsentId",
+       "channelId" ,
+       compliance,
+       "createdBy",
+       "createdTime",
+       "credentialSetIdMod100",
+       credentials ,
+       "errorNotificationTimestamp",
+       fingerprint ,
+       "consentId" ,
+       "lastAttemptTime" ,
+       "lastModifiedBy" ,
+       "lastModifiedTime" ,
+       "lastSuccessTime" ,
+       "nickName" ,
+       "originatingOfferingId" ,
+       "participatingOfferingIds" ,
+       "providerId" ,
+       status )
+      VALUES
+       (
+       {fdpProfileId},
+       {credentialSetId},
+       {additionalInfo},
+       {alternateIds},
+       {bankConsent} ,
+       {bankConsentId},
+       {channelId} ,
+       {compliance},
+       {createdBy},
+       {createdTime},
+       {credentialSetIdMod100},
+       {credentials} ,
+       {errorNotificationTimestamp},
+       {fingerprint} ,
+       {consentId} ,
+       {lastAttemptTime} ,
+       {lastModifiedBy} ,
+       {lastModifiedTime} ,
+       {lastSuccessTime} ,
+       {nickName} ,
+       {originatingOfferingId} ,
+       {participatingOfferingIds} ,
+       {providerId} ,
+       {status}
+      );
+
+  - write-credentialHistory: |
+      INSERT INTO <<keyspace:baselines>>."credentialHistory" (
+       "fdpProfileId",
+       "credentialSetId",
+       version,
+       "additionalInfo",
+       "alternateIds",
+       "channelId",
+       compliance,
+       "createdTime",
+       credentials,
+       "errorNotificationTimestamp",
+       fingerprint,
+       "lastAttemptTime",
+       "lastModifiedTime",
+       "lastSuccessTime",
+       "nickName",
+       "originatingOfferingId",
+       "participatingOfferingIds",
+       "providerId",
+       status
+      ) VALUES (
+       {fdpProfileId},
+       {credentialSetId},
+       {version},
+       {additionalInfo},
+       {alternateIds},
+       {channelId},
+       {compliance},
+       {createdTime},
+       {credentials},
+       {errorNotificationTimestamp},
+       {fingerprint},
+       {lastAttemptTime},
+       {lastModifiedTime},
+       {lastSuccessTime},
+       {nickName},
+       {originatingOfferingId},
+       {participatingOfferingIds},
+       {providerId},
+       {status}
+      );
+
+  - write-credentialSet: |
+      INSERT INTO <<keyspace:baselines>>."credentialSet" (
+       "fdpProfileId",
+       "credentialSetId",
+       "additionalInfo",
+       "alternateIds",
+       "bankConsent",
+       "bankConsentId",
+       "channelId",
+       compliance,
+       "createdBy",
+       "createdTime",
+       "credentialSetIdMod100",
+       credentials,
+       "errorNotificationTimestamp",
+       fingerprint,
+       "consentId",
+       "lastAttemptTime",
+       "lastModifiedBy",
+       "lastModifiedTime",
+       "lastSuccessTime",
+       "nickName",
+       "originatingOfferingId",
+       "participatingOfferingIds",
+       "providerId",
+       status
+      ) VALUES (
+       {fdpProfileId},
+       {credentialSetId},
+       {additionalInfo},
+       {alternateIds},
+       {bankConsent} ,
+       {bankConsentId},
+       {channelId} ,
+       {compliance},
+       {createdBy},
+       {createdTime},
+       {credentialSetIdMod100},
+       {credentials} ,
+       {errorNotificationTimestamp},
+       {fingerprint} ,
+       {consentId} ,
+       {lastAttemptTime} ,
+       {lastModifiedBy} ,
+       {lastModifiedTime} ,
+       {lastSuccessTime} ,
+       {nickName} ,
+       {originatingOfferingId} ,
+       {participatingOfferingIds} ,
+       {providerId} ,
+       {status}
+      );
+
+
+- tags:
+    phase: main
+  params:
+    prepared: true
+    instrument: true
+    cl: <<write_cl:LOCAL_QUORUM>>
+    ratio: <<write_ratio:1>>
+
+  statements:
+  - write-consent: |
+      INSERT INTO <<keyspace:baselines>>.consent ("profileId", "credentialSetId", "consentType", "consentStatus", "createdTime", "lastModifiedTime") VALUES ({profileId}, {credentialSetId}, {consentType}, {consentStatus}, {createdTime}, {lastModifiedTime});
+  - write-providerCredentialStatus: |
+      INSERT INTO <<keyspace:baselines>>."providerCredentialStatus" ("providerId", "credentialSetIdMod5", "errorCode", "statusChangeTime", "fdpProfileId", "credentialSetId") VALUES ({providerId}, {credentialSetIdMod5}, {errorCode}, {statusChangeTime}, {fdpProfileId}, {credentialSetId});
+
+  - write-credentialSetByProvider: |
+      INSERT INTO <<keyspace:baselines>>."credentialSetByProvider" ("providerId", "credentialSetIdMod100", "credentialSetId", "additionalInfo", "alternateIds", "bankConsent", "bankConsentId", "channelId", compliance, "createdBy", "createdTime", credentials, "errorNotificationTimestamp", "fdpProfileId", fingerprint, "consentId", "lastAttemptTime", "lastModifiedBy", "lastModifiedTime", "lastSuccessTime", "nickName", "originatingOfferingId", "participatingOfferingIds", status) VALUES ({providerId}, {credentialSetIdMod100}, {credentialSetId}, {additionalInfo}, {alternateIds}, {bankConsent}, {bankConsentId}, {channelId}, {compliance}, {createdBy}, {createdTime}, {credentials}, {errorNotificationTimestamp}, {fdpProfileId}, {fingerprint}, {consentId}, {lastAttemptTime}, {lastModifiedBy}, {lastModifiedTime}, {lastSuccessTime}, {nickName}, {originatingOfferingId}, {participatingOfferingIds}, {status});
+  - write-maskedCredentialSet: |
+      INSERT INTO <<keyspace:baselines>>."maskedCredentialSet" (
+       "fdpProfileId",
+       "credentialSetId",
+       "additionalInfo",
+       "alternateIds",
+       "bankConsent" ,
+       "bankConsentId",
+       "channelId" ,
+       compliance,
+       "createdBy",
+       "createdTime",
+       "credentialSetIdMod100",
+       credentials ,
+       "errorNotificationTimestamp",
+       fingerprint ,
+       "consentId" ,
+       "lastAttemptTime" ,
+       "lastModifiedBy" ,
+       "lastModifiedTime" ,
+       "lastSuccessTime" ,
+       "nickName" ,
+       "originatingOfferingId" ,
+       "participatingOfferingIds" ,
+       "providerId" ,
+       status )
+      VALUES
+       (
+       {fdpProfileId},
+       {credentialSetId},
+       {additionalInfo},
+       {alternateIds},
+       {bankConsent} ,
+       {bankConsentId},
+       {channelId} ,
+       {compliance},
+       {createdBy},
+       {createdTime},
+       {credentialSetIdMod100},
+       {credentials} ,
+       {errorNotificationTimestamp},
+       {fingerprint} ,
+       {consentId} ,
+       {lastAttemptTime} ,
+       {lastModifiedBy} ,
+       {lastModifiedTime} ,
+       {lastSuccessTime} ,
+       {nickName} ,
+       {originatingOfferingId} ,
+       {participatingOfferingIds} ,
+       {providerId} ,
+       {status}
+      );
+
+  - write-credentialHistory: |
+      INSERT INTO <<keyspace:baselines>>."credentialHistory" (
+       "fdpProfileId",
+       "credentialSetId",
+       version,
+       "additionalInfo",
+       "alternateIds",
+       "channelId",
+       compliance,
+       "createdTime",
+       credentials,
+       "errorNotificationTimestamp",
+       fingerprint,
+       "lastAttemptTime",
+       "lastModifiedTime",
+       "lastSuccessTime",
+       "nickName",
+       "originatingOfferingId",
+       "participatingOfferingIds",
+       "providerId",
+       status
+      ) VALUES (
+       {fdpProfileId},
+       {credentialSetId},
+       {version},
+       {additionalInfo},
+       {alternateIds},
+       {channelId},
+       {compliance},
+       {createdTime},
+       {credentials},
+       {errorNotificationTimestamp},
+       {fingerprint},
+       {lastAttemptTime},
+       {lastModifiedTime},
+       {lastSuccessTime},
+       {nickName},
+       {originatingOfferingId},
+       {participatingOfferingIds},
+       {providerId},
+       {status}
+      );
+
+  - write-credentialSet: |
+      INSERT INTO <<keyspace:baselines>>."credentialSet" (
+       "fdpProfileId",
+       "credentialSetId",
+       "additionalInfo",
+       "alternateIds",
+       "bankConsent",
+       "bankConsentId",
+       "channelId",
+       compliance,
+       "createdBy",
+       "createdTime",
+       "credentialSetIdMod100",
+       credentials,
+       "errorNotificationTimestamp",
+       fingerprint,
+       "consentId",
+       "lastAttemptTime",
+       "lastModifiedBy",
+       "lastModifiedTime",
+       "lastSuccessTime",
+       "nickName",
+       "originatingOfferingId",
+       "participatingOfferingIds",
+       "providerId",
+       status
+      ) VALUES (
+       {fdpProfileId},
+       {credentialSetId},
+       {additionalInfo},
+       {alternateIds},
+       {bankConsent} ,
+       {bankConsentId},
+       {channelId} ,
+       {compliance},
+       {createdBy},
+       {createdTime},
+       {credentialSetIdMod100},
+       {credentials} ,
+       {errorNotificationTimestamp},
+       {fingerprint} ,
+       {consentId} ,
+       {lastAttemptTime} ,
+       {lastModifiedBy} ,
+       {lastModifiedTime} ,
+       {lastSuccessTime} ,
+       {nickName} ,
+       {originatingOfferingId} ,
+       {participatingOfferingIds} ,
+       {providerId} ,
+       {status}
+      );
+
+- tags:
+    phase: main
+  params:
+    prepared: true
+    instrument: true
+    cl: <<read_cl:LOCAL_QUORUM>>
+    ratio: <<read_partition_ratio:1>>
+
+  statements:
+  - read-consent: |
+      SELECT * FROM <<keyspace:baselines>>.consent WHERE "profileId" = {profileId} LIMIT <<limit:1000>>;
+  - read-providerCredentialStatus: |
+      SELECT * FROM <<keyspace:baselines>>."providerCredentialStatus"  WHERE "providerId" = {providerId} AND "credentialSetIdMod5" = {credentialSetIdMod5} LIMIT <<limit:1000>>;
+  - read-credentialSetByProvider: |
+      SELECT * FROM <<keyspace:baselines>>."credentialSetByProvider" WHERE "providerId" = {providerId}  AND "credentialSetIdMod100" = {credentialSetIdMod100} LIMIT <<limit:1000>>;
+  - read-maskedCredentialSet: |
+      SELECT * FROM <<keyspace:baselines>>."maskedCredentialSet" WHERE "fdpProfileId" = {fdpProfileId} LIMIT <<limit:1000>>;
+  - read-credentialHistory: |
+      SELECT * FROM  <<keyspace:baselines>>."credentialHistory" WHERE "fdpProfileId" = {fdpProfileId} LIMIT <<limit:1000>>;
+  - read-credentialSet: |
+      SELECT * FROM <<keyspace:baselines>>."credentialSet" WHERE "fdpProfileId" = {fdpProfileId} LIMIT <<limit:1000>>;
+
+- tags:
+    phase: main
+  params:
+    prepared: true
+    instrument: true
+    cl: <<read_cl:LOCAL_QUORUM>>
+    ratio: <<read_row_ratio:1>>
+
+  statements:
+  - read-consent: |
+      SELECT * FROM <<keyspace:baselines>>.consent WHERE "profileId" = {profileId} AND "credentialSetId" = {credentialSetId} AND  "consentType" = {consentType} LIMIT <<limit:1000>>;
+  - read-providerCredentialStatus: |
+      SELECT * FROM <<keyspace:baselines>>."providerCredentialStatus"  WHERE "providerId" = {providerId} AND "credentialSetIdMod5" = {credentialSetIdMod5} AND "errorCode" = {errorCode} AND "statusChangeTime" = {statusChangeTime} AND "fdpProfileId" = {fdpProfileId} AND "credentialSetId" = {credentialSetId} LIMIT <<limit:1000>>;
+  - read-credentialSetByProvider: |
+      SELECT * FROM <<keyspace:baselines>>."credentialSetByProvider" WHERE "providerId" = {providerId}  AND "credentialSetIdMod100" = {credentialSetIdMod100} AND "credentialSetId" = {credentialSetId} LIMIT <<limit:1000>>;
+  - read-maskedCredentialSet: |
+      SELECT * FROM <<keyspace:baselines>>."maskedCredentialSet" WHERE "fdpProfileId" = {fdpProfileId} AND "credentialSetId" = {credentialSetId} LIMIT <<limit:1000>>;
+  - read-credentialHistory: |
+      SELECT * FROM  <<keyspace:baselines>>."credentialHistory" WHERE "fdpProfileId" = {fdpProfileId} AND "credentialSetId" = {credentialSetId} AND version = {version} LIMIT <<limit:1000>>;
+  - read-credentialSet: |
+      SELECT * FROM <<keyspace:baselines>>."credentialSet" WHERE "fdpProfileId" = {fdpProfileId} AND "credentialSetId" = {credentialSetId} LIMIT <<limit:1000>>;
