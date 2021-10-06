@@ -21,6 +21,8 @@ import io.nosqlbench.engine.api.activityconfig.yaml.StmtsDocList;
 import io.nosqlbench.engine.api.activityimpl.ActivityDef;
 import io.nosqlbench.engine.api.activityimpl.ParameterMap;
 import io.nosqlbench.engine.api.activityimpl.SimpleActivity;
+import io.nosqlbench.engine.api.metrics.ExceptionCountMetrics;
+import io.nosqlbench.engine.api.metrics.ExceptionHistoMetrics;
 import io.nosqlbench.engine.api.templating.StrInterpolator;
 import io.nosqlbench.engine.api.util.TagFilter;
 import io.nosqlbench.grpc.binders.ValuesBinder;
@@ -51,6 +53,9 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
         StargateActivity.class);
     private OpSequence<Request> opsequence;
 
+    private final ExceptionCountMetrics exceptionCountMetrics;
+    private final ExceptionHistoMetrics exceptionHistoMetrics;
+
     private int maxPages;
     private int maxTries;
     private long retryDelay;
@@ -64,6 +69,8 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
     public StargateActivity(ActivityDef activityDef) {
         super(activityDef);
         this.activityDef = activityDef;
+        exceptionCountMetrics = new ExceptionCountMetrics(activityDef);
+        exceptionHistoMetrics = new ExceptionHistoMetrics(activityDef);
     }
 
     public StargateFutureStub getStub() {
@@ -184,6 +191,14 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
 
     public OpSequence<Request> getOpSequencer() {
         return opsequence;
+    }
+
+    public ExceptionCountMetrics getExceptionCountMetrics() {
+        return exceptionCountMetrics;
+    }
+
+    public ExceptionHistoMetrics getExceptionHistoMetrics() {
+        return exceptionHistoMetrics;
     }
 
     private StmtsDocList loadStmtsYaml() {
