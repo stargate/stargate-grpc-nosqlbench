@@ -1,10 +1,12 @@
 package io.nosqlbench.grpc.binders;
 
 import com.google.protobuf.Any;
+import io.nosqlbench.virtdata.api.bindings.VALUE;
 import io.nosqlbench.virtdata.core.bindings.ValuesArrayBinder;
 import io.stargate.proto.QueryOuterClass;
 import io.stargate.proto.QueryOuterClass.Payload;
 import io.stargate.proto.QueryOuterClass.Value;
+import io.stargate.proto.QueryOuterClass.Value.Unset;
 import io.stargate.proto.QueryOuterClass.Values;
 import java.time.LocalDate;
 import java.util.Collection;
@@ -33,6 +35,7 @@ public class ValuesBinder implements ValuesArrayBinder<Object, Payload> {
     }
 
     public static final Codec<?>[] CODECS = new Codec[]{
+        UnsetCodec.instance,
         BooleanCodec.instance,
         BigintCodec.instance,
         IntCodec.instance,
@@ -70,6 +73,22 @@ public class ValuesBinder implements ValuesArrayBinder<Object, Payload> {
             return Payload.newBuilder().setData(Any.pack(valuesBuilder.build())).build();
         } else {
             return null;
+        }
+    }
+
+    public static class UnsetCodec extends Codec<VALUE> {
+
+        public static final UnsetCodec instance = new UnsetCodec();
+
+        public static final Value UNSET = Value.newBuilder().setUnset(Unset.newBuilder()).build();
+
+        public UnsetCodec() {
+            super(VALUE.class);
+        }
+
+        @Override
+        public Value encode(Object value) {
+            return UNSET;
         }
     }
 
@@ -111,7 +130,7 @@ public class ValuesBinder implements ValuesArrayBinder<Object, Payload> {
 
         @Override
         public Value encode(Object value) {
-            return io.stargate.grpc.Values.of((long) value);
+            return io.stargate.grpc.Values.of(((Number)value).longValue());
         }
     }
 
@@ -125,7 +144,7 @@ public class ValuesBinder implements ValuesArrayBinder<Object, Payload> {
 
         @Override
         public Value encode(Object value) {
-            return io.stargate.grpc.Values.of((short) value);
+            return io.stargate.grpc.Values.of(((Number)value).shortValue());
         }
     }
 
@@ -139,7 +158,7 @@ public class ValuesBinder implements ValuesArrayBinder<Object, Payload> {
 
         @Override
         public Value encode(Object value) {
-            return io.stargate.grpc.Values.of((byte) value);
+            return io.stargate.grpc.Values.of(((Number)value).byteValue());
         }
     }
 
@@ -153,7 +172,7 @@ public class ValuesBinder implements ValuesArrayBinder<Object, Payload> {
 
         @Override
         public Value encode(Object value) {
-            return io.stargate.grpc.Values.of((float) value);
+            return io.stargate.grpc.Values.of(((Number)value).floatValue());
         }
     }
 
@@ -167,7 +186,7 @@ public class ValuesBinder implements ValuesArrayBinder<Object, Payload> {
 
         @Override
         public Value encode(Object value) {
-            return io.stargate.grpc.Values.of((double) value);
+            return io.stargate.grpc.Values.of(((Number)value).doubleValue());
         }
     }
 

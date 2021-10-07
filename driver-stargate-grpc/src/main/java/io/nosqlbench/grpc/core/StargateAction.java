@@ -98,89 +98,97 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
         boolean completed = false;
         int tries = 0;
         while (tries < maxTries && !completed) {
+            tries++;
+
+            if (tries >= maxTries) {
+                throw new RuntimeException("Exhausted max retries");
+            }
+
+            if (tries > 1) {
+                try {
+                    Thread.sleep(Math.min((retryDelay << tries) / 1000, maxRetryDelay / 1000));
+                } catch (InterruptedException ignored) {
+                    // Do nothing
+                }
+            }
+
+            ListenableFuture<Response> responseFuture;
+
+            QueryParameters.Builder paramsBuilder = QueryParameters.newBuilder();
+            if (pagingState != null) {
+                paramsBuilder.setPagingState(BytesValue.of(pagingState));
+            }
+
+            request.consistency().ifPresent(cl -> paramsBuilder.setConsistency(ConsistencyValue.newBuilder().setValue(cl)));
+
+            request.serialConsistency().ifPresent(cl -> paramsBuilder.setSerialConsistency(ConsistencyValue.newBuilder().setValue(cl)));
+
+            Query.Builder queryBuilder = Query.newBuilder().setCql(request.cql());
+
+            try (Timer.Context ignored = bindTimer.time()) {
+                Payload values = request.bindings().bind(cycle);
+                if (values != null) {
+                    queryBuilder.setValues(values);
+                }
+            }
+
+            try (Timer.Context ignored = executeTimer.time()) {
+                responseFuture = stub
+                    .executeQuery(queryBuilder.build());
+            }
+
+            Timer.Context resultTime = resultTimer.time();
             try {
-                tries++;
+                Response response = responseFuture.get();
 
-                if (tries >= maxTries) {
-                    throw new RuntimeException("Exhausted max retries");
-                }
+                if (response.hasResultSet()) {
+                    ResultSet rs = response.getResultSet().getData().unpack(ResultSet.class);
 
-                if (tries > 1) {
-                    try {
-                        Thread.sleep(Math.min((retryDelay << tries) / 1000, maxRetryDelay / 1000));
-                    } catch (InterruptedException ignored) {
-                        // Do nothing
-                    }
-                }
+                    request.verifierBindings().ifPresent(bindings -> {
+                        // Only checking field names for now which matches the functionality of the driver-cql-shaded
+                        Map<String, Object> expectedValues = bindings.getLazyMap(cycle);
+                        Set<String> fields = rs.getColumnsList().stream()
+                            .map(ColumnSpec::getName).collect(Collectors.toSet());
+                        List<String> missingFields = expectedValues.keySet().stream()
+                            .filter(k -> !fields.contains(k)).collect(Collectors.toList());
+                        if (!missingFields.isEmpty()) {
+                            throw new RuntimeException(
+                                String.format("Missing columns %s on cycle %d",
+                                    String.join(", ", missingFields), cycle));
+                        }
+                    });
 
-                ListenableFuture<Response> responseFuture;
-
-                QueryParameters.Builder paramsBuilder = QueryParameters.newBuilder();
-                if (pagingState != null) {
-                    paramsBuilder.setPagingState(BytesValue.of(pagingState));
-                }
-
-                request.consistency().ifPresent(cl -> paramsBuilder.setConsistency(ConsistencyValue.newBuilder().setValue(cl)));
-
-                request.serialConsistency().ifPresent(cl -> paramsBuilder.setSerialConsistency(ConsistencyValue.newBuilder().setValue(cl)));
-
-                Query.Builder queryBuilder = Query.newBuilder().setCql(request.cql());
-
-                try (Timer.Context ignored = bindTimer.time()) {
-                    Payload values = request.bindings().bind(cycle);
-                    if (values != null) {
-                        queryBuilder.setValues(values);
-                    }
-                }
-
-                try (Timer.Context ignored = executeTimer.time()) {
-                    responseFuture = stub
-                        .executeQuery(queryBuilder.build());
-                }
-
-                try (Timer.Context ignored = resultTimer.time()) {
-                    Response response = responseFuture.get();
-
-                    if (response.hasResultSet()) {
-                        ResultSet rs = response.getResultSet().getData().unpack(ResultSet.class);
-
-                        request.verifierBindings().ifPresent(bindings -> {
-                            // Only checking field names for now which matches the functionality of the driver-cql-shaded
-                            Map<String, Object> expectedValues = bindings.getLazyMap(cycle);
-                            Set<String> fields = rs.getColumnsList().stream()
-                                .map(ColumnSpec::getName).collect(Collectors.toSet());
-                            List<String> missingFields = expectedValues.keySet().stream()
-                                .filter(k -> !fields.contains(k)).collect(Collectors.toList());
-                            if (!missingFields.isEmpty()) {
-                                throw new RuntimeException(
-                                    String.format("Missing columns %s on cycle %d",
-                                        String.join(", ", missingFields), cycle));
-                            }
-                        });
-
-                        if (rs.hasPagingState()) {
-                            pagingState = rs.getPagingState().getValue();
-                            if (++numPages > maxPages) {
-                                throw new RuntimeException("Exceeded the max number of pages");
-                            }
-                        } else {
-                            resultSuccessTimer
-                                .update(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
-                            pagingState = null;
+                    if (rs.hasPagingState()) {
+                        pagingState = rs.getPagingState().getValue();
+                        if (++numPages > maxPages) {
+                            throw new RuntimeException("Exceeded the max number of pages");
                         }
                     } else {
                         resultSuccessTimer
                             .update(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
                         pagingState = null;
                     }
-
-                    completed = true;
+                } else {
+                    resultSuccessTimer
+                        .update(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
+                    pagingState = null;
                 }
+
+                completed = true;
             } catch (Exception e) {
+                long resultNanos = resultTime.stop();
+                resultTime = null;
+                activity.getExceptionCountMetrics().count(e.getClass().getSimpleName());
+                activity.getExceptionHistoMetrics().update(e.getClass().getSimpleName(), resultNanos);
                 if (!shouldRetry(e)) {
+                    logger.error("Unable to retry request with error: {}", e.getMessage());
                     triesHisto.update(tries);
                     pagingState = null;
                     return -1;
+                }
+            } finally {
+                if (resultTime != null) {
+                    resultTime.stop();
                 }
             }
         }
