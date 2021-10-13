@@ -44,12 +44,13 @@ public class StubCache<S extends AbstractStub<S>> implements Shutdownable {
     }
 
     private S build(ActivityDef def, Function<ManagedChannel, S> construct) {
-        String host = def.getParams().getOptionalString("host").orElse("localhost");
+        String host = def.getParams().getOptionalString("hosts").orElse("localhost");
         int port = def.getParams().getOptionalInteger("port").orElse(8090);
 
         // It is most convenient to call this `auth_token` because the NoSQLBench module running with Fallout already uses the name auth_token for other Stargate activities
         String token = def.getParams().getOptionalString("auth_token").orElseThrow(() -> new RuntimeException("No auth token configured for gRPC driver"));
 
+        logger.info("Building channel for host: {} port: {} token: {}" , host,port, token);
         ManagedChannel channel =
             ManagedChannelBuilder.forAddress(host, port)
                 .usePlaintext() // TODO support SSL
