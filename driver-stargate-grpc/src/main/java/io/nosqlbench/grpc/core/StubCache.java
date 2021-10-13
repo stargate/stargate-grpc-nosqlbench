@@ -44,17 +44,28 @@ public class StubCache<S extends AbstractStub<S>> implements Shutdownable {
     }
 
     private S build(ActivityDef def, Function<ManagedChannel, S> construct) {
-        String host = def.getParams().getOptionalString("host").orElse("localhost");
+        String host = def.getParams().getOptionalString("hosts").orElse("localhost");
         int port = def.getParams().getOptionalInteger("port").orElse(8090);
+        // plainText should when running a Stargate directly. When connecting to astra, it should be set to false.
+        boolean usePlaintext = def.getParams().getOptionalBoolean("use_plaintext").orElse(true);
 
         // It is most convenient to call this `auth_token` because the NoSQLBench module running with Fallout already uses the name auth_token for other Stargate activities
         String token = def.getParams().getOptionalString("auth_token").orElseThrow(() -> new RuntimeException("No auth token configured for gRPC driver"));
 
-        ManagedChannel channel =
-            ManagedChannelBuilder.forAddress(host, port)
-                .usePlaintext() // TODO support SSL
-                .directExecutor()
-                .build();
+        logger.info("Building channel for host: {} port: {} token: {} usePlaintext: {} " , host,port, token, usePlaintext);
+        ManagedChannel channel;
+        if(usePlaintext) {
+            channel =
+                ManagedChannelBuilder.forAddress(host, port)
+                    .usePlaintext()
+                    .directExecutor()
+                    .build();
+        }else{
+            channel =
+                ManagedChannelBuilder.forAddress(host, port)
+                    .directExecutor()
+                    .build();
+        }
 
         return construct.apply(channel).withCallCredentials(new StargateBearerToken(token));
     }
