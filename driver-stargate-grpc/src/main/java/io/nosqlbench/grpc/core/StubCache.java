@@ -44,7 +44,7 @@ public class StubCache<S extends AbstractStub<S>> implements Shutdownable {
     }
 
     private S build(ActivityDef def, Function<ManagedChannel, S> construct) {
-        String host = def.getParams().getOptionalString("host").orElse("localhost");
+        String host = def.getParams().getOptionalString("hosts").orElseThrow(() -> new RuntimeException("`hosts` parameter is required!"));
         int port = def.getParams().getOptionalInteger("port").orElse(8090);
         // plainText should when running a Stargate directly. When connecting to astra, it should be set to false.
         boolean usePlaintext = def.getParams().getOptionalBoolean("use_plaintext").orElse(true);
