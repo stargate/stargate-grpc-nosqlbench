@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import java.util.concurrent.ExecutionException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -100,7 +101,7 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
             tries++;
 
             if (tries >= maxTries) {
-                throw new RuntimeException("Exhausted max retries");
+                handleErrorLogging(new RuntimeException("Exhausted max retries"));
             }
 
             if (tries > 1) {
@@ -239,6 +240,13 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
             status = ((StatusException) e).getStatus();
         } else if (e instanceof StatusRuntimeException) {
             status = ((StatusRuntimeException) e).getStatus();
+        } else if (e instanceof ExecutionException) {
+            Throwable cause = e.getCause();
+            if (cause != null && cause instanceof StatusException) {
+                status = ((StatusException) cause).getStatus();
+            } else if (cause != null && cause instanceof StatusRuntimeException) {
+                status = ((StatusRuntimeException) cause).getStatus();
+            }
         }
 
         // Retry if there's an unavailable exception or read/write timeout

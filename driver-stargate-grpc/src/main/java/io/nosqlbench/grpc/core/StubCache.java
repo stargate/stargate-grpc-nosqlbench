@@ -10,6 +10,7 @@ import io.grpc.stub.AbstractStub;
 import io.nosqlbench.engine.api.activityapi.core.Shutdownable;
 import io.nosqlbench.engine.api.activityimpl.ActivityDef;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -44,7 +45,10 @@ public class StubCache<S extends AbstractStub<S>> implements Shutdownable {
     }
 
     private S build(ActivityDef def, Function<ManagedChannel, S> construct) {
-        String host = def.getParams().getOptionalString("hosts").orElseThrow(() -> new RuntimeException("`hosts` parameter is required!"));
+        Optional<String> hostsOpt = def.getParams().getOptionalString("hosts");
+        Optional<String> hostOpt = def.getParams().getOptionalString("host");
+        String host = hostsOpt.orElse(hostOpt.orElseThrow(() -> new RuntimeException("`hosts` or `host` are required")));
+        
         int port = def.getParams().getOptionalInteger("port").orElse(8090);
         // plainText should when running a Stargate directly. When connecting to astra, it should be set to false.
         boolean usePlaintext = def.getParams().getOptionalBoolean("use_plaintext").orElse(true);
@@ -52,7 +56,7 @@ public class StubCache<S extends AbstractStub<S>> implements Shutdownable {
         // It is most convenient to call this `auth_token` because the NoSQLBench module running with Fallout already uses the name auth_token for other Stargate activities
         String token = def.getParams().getOptionalString("auth_token").orElseThrow(() -> new RuntimeException("No auth token configured for gRPC driver"));
 
-        logger.info("Building channel for host: {} port: {} token: {} usePlaintext: {} " , host,port, token, usePlaintext);
+        logger.info("Building channel for host: {} port: {} token: {} usePlaintext: {} " , host, port, token, usePlaintext);
         ManagedChannel channel;
         if(usePlaintext) {
             channel =
