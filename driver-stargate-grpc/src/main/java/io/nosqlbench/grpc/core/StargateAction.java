@@ -28,12 +28,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import java.util.concurrent.ExecutionException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 @SuppressWarnings("Duplicates")
 public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDefObserver {
-
     private final static Logger logger = LogManager.getLogger(
         StargateAction.class);
 
@@ -101,7 +101,7 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
             tries++;
 
             if (tries >= maxTries) {
-                throw new RuntimeException("Exhausted max retries");
+                handleErrorLogging(new RuntimeException("Exhausted max retries"));
             }
 
             if (tries > 1) {
@@ -181,7 +181,7 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
                 activity.getExceptionCountMetrics().count(e.getClass().getSimpleName());
                 activity.getExceptionHistoMetrics().update(e.getClass().getSimpleName(), resultNanos);
                 if (!shouldRetry(e)) {
-                    logger.error("Unable to retry request with error: {}", e.getMessage());
+                    handleErrorLogging(e);
                     triesHisto.update(tries);
                     pagingState = null;
                     return -1;
@@ -195,6 +195,24 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
 
         triesHisto.update(tries);
         return 0;
+    }
+
+    private void handleErrorLogging(Exception e) {
+        StargateActionException sae = new StargateActionException(e);
+        long now = System.currentTimeMillis();
+        if (this.activity.getExceptionInfo().containsKey(sae)) {
+            ExceptionMetaData metadata = this.activity.getExceptionInfo().get(sae);
+            if (now - metadata.timeWritten() > StargateActivity.MILLIS_BETWEEN_SIMILAR_ERROR) {
+                String numberOfMessages = String.format("[%d times]", metadata.numSquelchedInstances());
+                logger.error("Unable to retry request with errors " + numberOfMessages, e);
+                this.activity.getExceptionInfo().compute(sae, (key, value) -> new ExceptionMetaData());
+            } else {
+                this.activity.getExceptionInfo().compute(sae, (key, value) -> value.increment());
+            }
+        } else {
+            logger.error("Unable to retry request with error [first encounter]", e);
+            this.activity.getExceptionInfo().put(sae, new ExceptionMetaData());
+        }
     }
 
     @Override
@@ -222,6 +240,13 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
             status = ((StatusException) e).getStatus();
         } else if (e instanceof StatusRuntimeException) {
             status = ((StatusRuntimeException) e).getStatus();
+        } else if (e instanceof ExecutionException) {
+            Throwable cause = e.getCause();
+            if (cause != null && cause instanceof StatusException) {
+                status = ((StatusException) cause).getStatus();
+            } else if (cause != null && cause instanceof StatusRuntimeException) {
+                status = ((StatusRuntimeException) cause).getStatus();
+            }
         }
 
         // Retry if there's an unavailable exception or read/write timeout

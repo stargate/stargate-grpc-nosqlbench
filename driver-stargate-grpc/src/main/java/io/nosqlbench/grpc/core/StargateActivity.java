@@ -42,6 +42,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 import org.apache.logging.log4j.LogManager;
@@ -53,6 +54,8 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
         StargateActivity.class);
     private OpSequence<Request> opsequence;
 
+    private ConcurrentHashMap<StargateActionException, ExceptionMetaData> exceptionInfo = new ConcurrentHashMap<>();
+    public static final long MILLIS_BETWEEN_SIMILAR_ERROR = 1000 * 60 * 10; // 10 minutes
     private final ExceptionCountMetrics exceptionCountMetrics;
     private final ExceptionHistoMetrics exceptionHistoMetrics;
 
@@ -85,6 +88,10 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
         setDefaultsFromOpSequence(this.opsequence);
 
         logger.debug("activity fully initialized: " + this.activityDef.getAlias());
+    }
+
+    public ConcurrentHashMap<StargateActionException, ExceptionMetaData> getExceptionInfo() {
+        return exceptionInfo;
     }
 
     private void initSequencer() {
