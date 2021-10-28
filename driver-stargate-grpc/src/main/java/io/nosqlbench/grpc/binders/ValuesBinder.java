@@ -1,10 +1,8 @@
 package io.nosqlbench.grpc.binders;
 
-import com.google.protobuf.Any;
 import io.nosqlbench.virtdata.api.bindings.VALUE;
 import io.nosqlbench.virtdata.core.bindings.ValuesArrayBinder;
 import io.stargate.proto.QueryOuterClass;
-import io.stargate.proto.QueryOuterClass.Payload;
 import io.stargate.proto.QueryOuterClass.Value;
 import io.stargate.proto.QueryOuterClass.Value.Unset;
 import io.stargate.proto.QueryOuterClass.Values;
@@ -17,7 +15,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public class ValuesBinder implements ValuesArrayBinder<Object, Payload> {
+public class ValuesBinder implements ValuesArrayBinder<Object, Values> {
 
     public abstract static class Codec<T> {
 
@@ -62,7 +60,7 @@ public class ValuesBinder implements ValuesArrayBinder<Object, Payload> {
     }
 
     @Override
-    public Payload bindValues(Object context, Object[] values) {
+    public Values bindValues(Object context, Object[] values) {
         if (values.length > 0) {
             Values.Builder valuesBuilder = Values.newBuilder();
 
@@ -70,7 +68,7 @@ public class ValuesBinder implements ValuesArrayBinder<Object, Payload> {
                 valuesBuilder.addValues(fromObject(value));
             }
 
-            return Payload.newBuilder().setData(Any.pack(valuesBuilder.build())).build();
+            return valuesBuilder.build();
         } else {
             return null;
         }

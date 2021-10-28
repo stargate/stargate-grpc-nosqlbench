@@ -26,25 +26,18 @@ import io.nosqlbench.engine.api.metrics.ExceptionHistoMetrics;
 import io.nosqlbench.engine.api.templating.StrInterpolator;
 import io.nosqlbench.engine.api.util.TagFilter;
 import io.nosqlbench.grpc.binders.ValuesBinder;
-import io.nosqlbench.grpc.core.StubCache.StargateBearerToken;
 import io.nosqlbench.nb.api.errors.BasicError;
-import io.nosqlbench.virtdata.core.bindings.Bindings;
 import io.nosqlbench.virtdata.core.bindings.BindingsTemplate;
-import io.nosqlbench.virtdata.core.bindings.ContextualArrayBindings;
 import io.nosqlbench.virtdata.core.bindings.ContextualBindingsArrayTemplate;
 import io.stargate.proto.QueryOuterClass.Consistency;
-import io.stargate.proto.QueryOuterClass.Payload;
+import io.stargate.proto.QueryOuterClass.Values;
 import io.stargate.proto.StargateGrpc;
-import io.stargate.proto.StargateGrpc.StargateBlockingStub;
 import io.stargate.proto.StargateGrpc.StargateFutureStub;
-import io.stargate.proto.StargateGrpc.StargateStub;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.Optional;
-import java.util.concurrent.Executor;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -117,7 +110,7 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
         for (OpTemplate stmtDef : stmts) {
             ParsedStmt parsed = stmtDef.getParsed(s -> s).orError();
 
-            ContextualBindingsArrayTemplate<Object, Payload> bindingTemplate = new ContextualBindingsArrayTemplate<>(null, new BindingsTemplate(), new ValuesBinder());
+            ContextualBindingsArrayTemplate<Object, Values> bindingTemplate = new ContextualBindingsArrayTemplate<>(null, new BindingsTemplate(), new ValuesBinder());
 
             bindingTemplate.getBindingsTemplate().addFieldBindings(parsed.getBindPoints());
 

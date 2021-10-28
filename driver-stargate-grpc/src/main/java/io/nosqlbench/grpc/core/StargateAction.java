@@ -14,21 +14,20 @@ import io.nosqlbench.engine.api.activityapi.core.MultiPhaseAction;
 import io.nosqlbench.engine.api.activityapi.core.SyncAction;
 import io.nosqlbench.engine.api.activityapi.planning.OpSequence;
 import io.nosqlbench.engine.api.activityimpl.ActivityDef;
-import io.nosqlbench.virtdata.core.bindings.Bindings;
 import io.stargate.proto.QueryOuterClass.ColumnSpec;
 import io.stargate.proto.QueryOuterClass.ConsistencyValue;
-import io.stargate.proto.QueryOuterClass.Payload;
 import io.stargate.proto.QueryOuterClass.Query;
 import io.stargate.proto.QueryOuterClass.QueryParameters;
 import io.stargate.proto.QueryOuterClass.Response;
 import io.stargate.proto.QueryOuterClass.ResultSet;
+import io.stargate.proto.QueryOuterClass.Values;
 import io.stargate.proto.StargateGrpc.StargateFutureStub;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
-import java.util.concurrent.ExecutionException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -126,7 +125,7 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
             Query.Builder queryBuilder = Query.newBuilder().setCql(request.cql());
 
             try (Timer.Context ignored = bindTimer.time()) {
-                Payload values = request.bindings().bind(cycle);
+                Values values = request.bindings().bind(cycle);
                 if (values != null) {
                     queryBuilder.setValues(values);
                 }
@@ -142,7 +141,7 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
                 Response response = responseFuture.get();
 
                 if (response.hasResultSet()) {
-                    ResultSet rs = response.getResultSet().getData().unpack(ResultSet.class);
+                    ResultSet rs = response.getResultSet();
 
                     request.verifierBindings().ifPresent(bindings -> {
                         // Only checking field names for now which matches the functionality of the driver-cql-shaded
