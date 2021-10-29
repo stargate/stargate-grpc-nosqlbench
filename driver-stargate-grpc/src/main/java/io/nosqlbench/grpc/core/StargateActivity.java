@@ -48,7 +48,7 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
     private OpSequence<Request> opsequence;
 
     private ConcurrentHashMap<StargateActionException, ExceptionMetaData> exceptionInfo = new ConcurrentHashMap<>();
-    public static final long MILLIS_BETWEEN_SIMILAR_ERROR = 1000 * 60 * 10; // 10 minutes
+    public static final long MILLIS_BETWEEN_SIMILAR_ERROR = 1000 * 60 * 5; // 5 minutes
     private final ExceptionCountMetrics exceptionCountMetrics;
     private final ExceptionHistoMetrics exceptionHistoMetrics;
 

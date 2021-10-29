@@ -179,8 +179,8 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
                 resultTime = null;
                 activity.getExceptionCountMetrics().count(e.getClass().getSimpleName());
                 activity.getExceptionHistoMetrics().update(e.getClass().getSimpleName(), resultNanos);
+                handleErrorLogging(e);
                 if (!shouldRetry(e)) {
-                    handleErrorLogging(e);
                     triesHisto.update(tries);
                     pagingState = null;
                     return -1;

@@ -1,19 +1,18 @@
 package io.nosqlbench.grpc.core;
 
 public class StargateActionException extends Throwable {
-    private Throwable wrapped;
-    public StargateActionException(Throwable e) {
-        this.wrapped = e;
+    public StargateActionException(Throwable t) {
+        super(t);
     }
 
     @Override
     public int hashCode() {
-        return wrapped.getMessage().hashCode();
+        return this.getCause().getMessage().hashCode();
     }
 
     @Override
     public String getMessage() {
-        return wrapped.getMessage();
+        return this.getCause().getMessage();
     }
 
     @Override
@@ -21,6 +20,6 @@ public class StargateActionException extends Throwable {
         if (other == null) return false;
         if (!(other instanceof StargateActionException)) return false;
         StargateActionException otherException = (StargateActionException) other;
-        return otherException.getMessage().equals(wrapped.getMessage());
+        return otherException.getCause().getMessage().equals(this.getCause().getMessage());
     }
 }
