@@ -3,7 +3,7 @@ package io.nosqlbench.grpc.core;
 import io.nosqlbench.virtdata.core.bindings.Bindings;
 import io.nosqlbench.virtdata.core.bindings.ContextualArrayBindings;
 import io.stargate.proto.QueryOuterClass.Consistency;
-import io.stargate.proto.QueryOuterClass.Payload;
+import io.stargate.proto.QueryOuterClass.Values;
 import java.util.Optional;
 import org.immutables.value.Value.Immutable;
 
@@ -19,7 +19,7 @@ interface Request {
 
     String cql();
 
-    ContextualArrayBindings<Object, Payload> bindings();
+    ContextualArrayBindings<Object, Values> bindings();
 
     Optional<Bindings> verifierBindings();
 
