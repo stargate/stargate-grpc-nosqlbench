@@ -100,6 +100,7 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
             tries++;
 
             if (tries >= maxTries) {
+                triesHisto.update(tries);
                 handleErrorLogging(new RuntimeException("Exhausted max retries"));
             }
 
