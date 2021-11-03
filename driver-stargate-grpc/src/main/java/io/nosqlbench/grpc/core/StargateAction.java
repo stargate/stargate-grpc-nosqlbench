@@ -194,7 +194,7 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
             }
         }
 
-        triesHisto.update(tries);
+        triesHisto.update(1);
         return 0;
     }
 
