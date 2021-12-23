@@ -5,7 +5,7 @@ public class ExceptionMetaData {
     int numSquelchedInstances;
     public ExceptionMetaData() {
         this.timeWritten = System.currentTimeMillis();
-        this.numSquelchedInstances = 0;
+        this.numSquelchedInstances = 1;
     }
 
     public long timeWritten() {

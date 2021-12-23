@@ -181,10 +181,12 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
                 activity.getExceptionHistoMetrics().update(e.getClass().getSimpleName(), resultNanos);
                 handleErrorLogging(e);
                 if (!shouldRetry(e)) {
-                    triesHisto.update(tries);
                     pagingState = null;
                     return -1;
                 }
+                // update every time we get retry
+                triesHisto.update(1);
+
             } finally {
                 if (resultTime != null) {
                     resultTime.stop();
@@ -192,7 +194,7 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
             }
         }
 
-        triesHisto.update(tries);
+        triesHisto.update(1);
         return 0;
     }
 
