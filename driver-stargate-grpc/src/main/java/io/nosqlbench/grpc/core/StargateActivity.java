@@ -29,8 +29,10 @@ import io.nosqlbench.grpc.binders.ValuesBinder;
 import io.nosqlbench.nb.api.errors.BasicError;
 import io.nosqlbench.virtdata.core.bindings.BindingsTemplate;
 import io.nosqlbench.virtdata.core.bindings.ContextualBindingsArrayTemplate;
+import io.stargate.proto.QueryOuterClass;
 import io.stargate.proto.QueryOuterClass.Consistency;
 import io.stargate.proto.QueryOuterClass.Values;
+import io.stargate.proto.ReactorStargateGrpc;
 import io.stargate.proto.StargateGrpc;
 import io.stargate.proto.StargateGrpc.StargateFutureStub;
 import java.util.ArrayList;
@@ -38,8 +40,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
 
 @SuppressWarnings("Duplicates")
 public class StargateActivity extends SimpleActivity implements Activity, ActivityDefObserver {
@@ -48,6 +54,8 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
     private OpSequence<Request> opsequence;
 
     private ConcurrentHashMap<StargateActionException, ExceptionMetaData> exceptionInfo = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<ReactiveStargateActionException, ExceptionMetaData> reactiveExceptionInfo = new ConcurrentHashMap<>();
+
     public static final long MILLIS_BETWEEN_SIMILAR_ERROR = 1000 * 60 * 5; // 5 minutes
     private final ExceptionCountMetrics exceptionCountMetrics;
     private final ExceptionHistoMetrics exceptionHistoMetrics;
@@ -59,7 +67,7 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
     private long requestDeadlineMs;
     private Integer numberOfConcurrentClients;
 
-    private static final StubCache<StargateFutureStub> stubCache = new StubCache<>();
+    private static final StubCache stubCache = new StubCache();
 
 
     public StargateActivity(ActivityDef activityDef) {
@@ -71,6 +79,31 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
 
     public StargateFutureStub getStub() {
         return stubCache.get();
+    }
+
+    public Flux<QueryOuterClass.StreamingResponse> executeQueryReactive(QueryOuterClass.Query query) {
+        StubCache.ReactiveState reactiveState = stubCache.getReactiveState();
+        if(reactiveState.fluxCreated()){
+            reactiveState.getListener().onQuery(query);
+            return reactiveState.getResponseFlux();
+        }else{
+            Flux<QueryOuterClass.Query> flux = Flux.create(new Consumer<FluxSink<QueryOuterClass.Query>>() {
+                @Override
+                public void accept(FluxSink<QueryOuterClass.Query> sink) {
+                    reactiveState.registerListener(
+                        new NewQueryListener(sink)
+                    );
+                }
+            });
+            reactiveState.setQueryFlux(flux);
+
+            Flux<QueryOuterClass.StreamingResponse> responseFlux
+                = reactiveState.reactorStargateStub.executeQueryStream(flux);
+            reactiveState.getListener().onQuery(query);
+            reactiveState.setResponseFlux(responseFlux);
+            return responseFlux;
+        }
+
     }
 
     @Override
@@ -86,6 +119,11 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
     public ConcurrentHashMap<StargateActionException, ExceptionMetaData> getExceptionInfo() {
         return exceptionInfo;
     }
+
+    public ConcurrentHashMap<ReactiveStargateActionException, ExceptionMetaData> getReactiveExceptionInfo() {
+        return reactiveExceptionInfo;
+    }
+
 
     private void initSequencer() {
         SequencerType sequencerType = SequencerType.valueOf(
@@ -166,7 +204,10 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
     }
 
     private void initializeGrpcStubs(Integer numberOfConcurrentClients) {
-        stubCache.build(activityDef, StargateGrpc::newFutureStub, numberOfConcurrentClients);
+        stubCache.build(activityDef,
+            StargateGrpc::newFutureStub,
+            ReactorStargateGrpc::newReactorStub,
+            numberOfConcurrentClients);
     }
 
     public int getMaxPages() {
