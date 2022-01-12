@@ -35,7 +35,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
+import reactor.util.retry.Retry;
+import reactor.util.retry.RetrySpec;
 
 @SuppressWarnings("Duplicates")
 public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDefObserver {
@@ -114,6 +117,7 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
 
             if (tries >= maxTries) {
                 handleErrorLogging(new RuntimeException("Exhausted max retries"));
+                completion.complete(-1);
             }
 
             if (tries > 1) {
