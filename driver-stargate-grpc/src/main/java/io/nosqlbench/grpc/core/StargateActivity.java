@@ -35,17 +35,17 @@ import io.stargate.proto.QueryOuterClass.Values;
 import io.stargate.proto.ReactorStargateGrpc;
 import io.stargate.proto.StargateGrpc;
 import io.stargate.proto.StargateGrpc.StargateFutureStub;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
-
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.FluxSink;
 
 @SuppressWarnings("Duplicates")
 public class StargateActivity extends SimpleActivity implements Activity, ActivityDefObserver {
@@ -81,11 +81,14 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
         return stubCache.get();
     }
 
-    public Flux<QueryOuterClass.StreamingResponse> executeQueryReactive(QueryOuterClass.Query query) {
+    public StubCache.ReactiveState executeQueryReactive(QueryOuterClass.Query query) {
         StubCache.ReactiveState reactiveState = stubCache.getReactiveState();
         if(reactiveState.fluxCreated()){
-            reactiveState.getListener().onQuery(query);
-            return reactiveState.getResponseFlux();
+            logger.info("fluxCreated. onQuery:" + query +" from Thread:" + Thread.currentThread().getName());
+            reactiveState.onQuery(query);
+            logger.info("return reactiveState.getResponseFlux(): " + reactiveState.getResponseFlux()
+                +" from Thread:" + Thread.currentThread().getName());
+            // there is already a subscription for it, don't return
         }else{
             Flux<QueryOuterClass.Query> flux = Flux.create(new Consumer<FluxSink<QueryOuterClass.Query>>() {
                 @Override
@@ -94,15 +97,20 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
                         new NewQueryListener(sink)
                     );
                 }
+            }).onErrorContinue((e,v) -> {
+                logger.warn("Error in the Query flux, it will continue processing.", e);
             });
+
             reactiveState.setQueryFlux(flux);
 
             Flux<QueryOuterClass.StreamingResponse> responseFlux
                 = reactiveState.reactorStargateStub.executeQueryStream(flux);
-            reactiveState.getListener().onQuery(query);
+            reactiveState.onQuery(query);
             reactiveState.setResponseFlux(responseFlux);
-            return responseFlux;
+            logger.info("return created responseFlux: " + responseFlux +" from Thread:" + Thread.currentThread().getName());
+            logger.info("After subscribe" +" from Thread:" + Thread.currentThread().getName());
         }
+        return reactiveState;
 
     }
 

@@ -14,7 +14,6 @@ import io.nosqlbench.engine.api.activityapi.core.MultiPhaseAction;
 import io.nosqlbench.engine.api.activityapi.core.SyncAction;
 import io.nosqlbench.engine.api.activityapi.planning.OpSequence;
 import io.nosqlbench.engine.api.activityimpl.ActivityDef;
-import io.stargate.proto.QueryOuterClass;
 import io.stargate.proto.QueryOuterClass.ColumnSpec;
 import io.stargate.proto.QueryOuterClass.ConsistencyValue;
 import io.stargate.proto.QueryOuterClass.Query;
@@ -23,22 +22,20 @@ import io.stargate.proto.QueryOuterClass.Response;
 import io.stargate.proto.QueryOuterClass.ResultSet;
 import io.stargate.proto.QueryOuterClass.Values;
 import io.stargate.proto.StargateGrpc.StargateFutureStub;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.reactivestreams.Publisher;
-import reactor.core.publisher.Flux;
-import reactor.util.retry.Retry;
-import reactor.util.retry.RetrySpec;
+import reactor.core.Disposable;
 
 @SuppressWarnings("Duplicates")
 public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDefObserver {
@@ -77,6 +74,7 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
 
     @Override
     public void init() {
+        logger.info("Creating new StargateAction");
         onActivityDefUpdate(activityDef);
         this.sequencer = activity.getOpSequencer();
         this.bindTimer = activity.getInstrumentation().getOrCreateBindTimer();
@@ -95,162 +93,137 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
 
     @Override
     public int runPhase(long cycle) {
-        if(biStreaming){
+        if (biStreaming) {
             return runStreaming(cycle);
-        }else{
+        } else {
             return runStandard(cycle);
         }
     }
 
+    // it needs to be an atomic reference because it's updated in the flux
+    private static final AtomicReference<CompletableFuture<Integer>> completionRef = new AtomicReference<>();
+    private static final AtomicReference<Timer.Context> resultTimeRef = new AtomicReference<>();
+    private static final AtomicReference<Long> startTimeRef = new AtomicReference<>();
     private int runStreaming(long cycle) {
+        logger.info("runStreaming called with cycle: " + cycle);
+
+        completionRef.set(new CompletableFuture<>());
         Request request = sequencer.get(cycle);
 
-        if (pagingState == null) {
-            numPages = 0;
-            startTime = System.nanoTime();
+        startTimeRef.set(System.nanoTime());
+
+        completionRef
+            .get()
+            .handle((i,t) -> {logger.info("handle: " + i + " t: " + t); return i;})
+            .whenComplete((integer, throwable) -> logger.info("Future completed: " + integer + " throwable: " + throwable));
+
+        StubCache.ReactiveState reactiveState;
+
+        QueryParameters.Builder paramsBuilder = QueryParameters.newBuilder();
+        request.consistency().ifPresent(cl -> paramsBuilder.setConsistency(ConsistencyValue.newBuilder().setValue(cl)));
+        request.serialConsistency().ifPresent(cl -> paramsBuilder.setSerialConsistency(ConsistencyValue.newBuilder().setValue(cl)));
+        Query.Builder queryBuilder = Query.newBuilder().setCql(request.cql());
+
+        try (Timer.Context ignored = bindTimer.time()) {
+            Values values = request.bindings().bind(cycle);
+            if (values != null) {
+                queryBuilder.setValues(values);
+            }
         }
 
-        int tries = 0;
-        CompletableFuture<Integer> completion = new CompletableFuture<>();
-        while (tries < maxTries && !completion.isDone()) {
-            tries++;
+        try (Timer.Context ignored = executeTimer.time()) {
+            Query query = queryBuilder.build();
+            logger.info("execute query: " + query + " from Thread:" + Thread.currentThread().getName() + " completion: " + completionRef);
+            reactiveState = activity.executeQueryReactive(query);
+        }
 
-            if (tries >= maxTries) {
-                handleErrorLogging(new RuntimeException("Exhausted max retries"));
-                completion.complete(-1);
-            }
+        resultTimeRef.set(resultTimer.time());
 
-            if (tries > 1) {
-                try {
-                    Thread.sleep(Math.min((retryDelay << tries) / 1000, maxRetryDelay / 1000));
-                } catch (InterruptedException ignored) {
-                    // Do nothing
-                }
-            }
+        if (!reactiveState.isSubscriptionCreated()) {
+            // build execution flow
+            logger.info("constructing flow, completable: " + completionRef);
+            Disposable subscription = reactiveState.getResponseFlux().doOnNext(
+                r -> {
+                    Response response = r.getResponse();
+                    logger.info("doOnNext, received: " + response + " from Thread:" + Thread.currentThread().getName());
+                    if (response.hasResultSet()) {
+                        ResultSet rs = response.getResultSet();
+                        logger.info("rs: " + rs + " from Thread:" + Thread.currentThread().getName());
 
-            Flux<QueryOuterClass.StreamingResponse> streamingResponseFlux;
-
-            QueryParameters.Builder paramsBuilder = QueryParameters.newBuilder();
-            if (pagingState != null) {
-                paramsBuilder.setPagingState(BytesValue.of(pagingState));
-            }
-
-            request.consistency().ifPresent(cl -> paramsBuilder.setConsistency(ConsistencyValue.newBuilder().setValue(cl)));
-
-            request.serialConsistency().ifPresent(cl -> paramsBuilder.setSerialConsistency(ConsistencyValue.newBuilder().setValue(cl)));
-
-            Query.Builder queryBuilder = Query.newBuilder().setCql(request.cql());
-
-            try (Timer.Context ignored = bindTimer.time()) {
-                Values values = request.bindings().bind(cycle);
-                if (values != null) {
-                    queryBuilder.setValues(values);
-                }
-            }
-
-            try (Timer.Context ignored = executeTimer.time()) {
-                    streamingResponseFlux =
-                        activity.executeQueryReactive(queryBuilder.build());
-            }
-
-            final Timer.Context[] resultTime = {resultTimer.time()};
-            try {
-                streamingResponseFlux.doOnNext(
-                    r -> {
-                        Response response = r.getResponse();
-                        if(response.hasResultSet()){
-                            ResultSet rs = response.getResultSet();
-
-                            request.verifierBindings().ifPresent(bindings -> {
-                                // Only checking field names for now which matches the functionality of the driver-cql-shaded
-                                Map<String, Object> expectedValues = bindings.getLazyMap(cycle);
-                                Set<String> fields = rs.getColumnsList().stream()
-                                    .map(ColumnSpec::getName).collect(Collectors.toSet());
-                                List<String> missingFields = expectedValues.keySet().stream()
-                                    .filter(k -> !fields.contains(k)).collect(Collectors.toList());
-                                if (!missingFields.isEmpty()) {
-                                    throw new RuntimeException(
-                                        String.format("Missing columns %s on cycle %d",
-                                            String.join(", ", missingFields), cycle));
-                                }
-                            });
-
-                            if (rs.hasPagingState()) {
-                                pagingState = rs.getPagingState().getValue();
-                                if (++numPages > maxPages) {
-                                    throw new RuntimeException("Exceeded the max number of pages");
-                                }
-                            } else {
-                                resultSuccessTimer
-                                    .update(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
-                                pagingState = null;
+                        request.verifierBindings().ifPresent(bindings -> {
+                            // Only checking field names for now which matches the functionality of the driver-cql-shaded
+                            Map<String, Object> expectedValues = bindings.getLazyMap(cycle);
+                            Set<String> fields = rs.getColumnsList().stream()
+                                .map(ColumnSpec::getName).collect(Collectors.toSet());
+                            List<String> missingFields = expectedValues.keySet().stream()
+                                .filter(k -> !fields.contains(k)).collect(Collectors.toList());
+                            if (!missingFields.isEmpty()) {
+                                throw new RuntimeException(
+                                    String.format("Missing columns %s on cycle %d",
+                                        String.join(", ", missingFields), cycle));
                             }
-                            completion.complete(null);
+                        });
+
+                        resultSuccessTimer
+                            .update(System.nanoTime() - startTimeRef.get(), TimeUnit.NANOSECONDS);
+                        completionRef.get().complete(0);
+
+                    } else {
+                        com.google.rpc.Status status = r.getStatus();
+                        if (status.getCode() == 0) {
+                            logger.info("Success without result set" + " from Thread:" + Thread.currentThread().getName());
+                            // it is a success response without any result set
+                            resultSuccessTimer
+                                .update(System.nanoTime() - startTimeRef.get(), TimeUnit.NANOSECONDS);
+                            completionRef.get().complete(0);
                         } else {
-                            com.google.rpc.Status status = r.getStatus();
-                            if (status.getCode() == 0){
-                                // it is a success response without any result set
-                                resultSuccessTimer
-                                    .update(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
-                                pagingState = null;
-                                completion.complete(null);
-                            } else {
-                                // it is an error
-                                long resultNanos = resultTime[0].stop();
-                                resultTime[0] = null;
-                                activity.getExceptionCountMetrics().count(status.getMessage());
-                                activity.getExceptionHistoMetrics().update(status.getMessage(), resultNanos);
-                                handleErrorLogging(status);
-                                if (!shouldRetry(status)) {
-                                    pagingState = null;
-                                    completion.complete(-1);
-                                }
-                                // update every time we get retry
-                                triesHisto.update(1);
-                            }
+                            logger.info("Error, code: " + status.getCode() + " from Thread:" + Thread.currentThread().getName());
+                            // it is an error
+                            long resultNanos = resultTimeRef.get().stop();
+                            resultTimeRef.set(null);
+                            activity.getExceptionCountMetrics().count(status.getMessage());
+                            activity.getExceptionHistoMetrics().update(status.getMessage(), resultNanos);
+                            handleErrorLogging(status);
+                            triesHisto.update(1);
+                            completionRef.get().complete(-1);
                         }
-
                     }
-                ).doOnError(e -> {
-                    long resultNanos = resultTime[0].stop();
-                    resultTime[0] = null;
-                    activity.getExceptionCountMetrics().count(e.getClass().getSimpleName());
-                    activity.getExceptionHistoMetrics().update(e.getClass().getSimpleName(), resultNanos);
-                    handleErrorLogging(e);
-                    if (!shouldRetry(e)) {
-                        pagingState = null;
-                        completion.complete(-1);
-                    }
-                    // update every time we get retry
-                    triesHisto.update(1);
-                });
 
-
-            } catch (Exception e) {
-                long resultNanos = resultTime[0].stop();
-                resultTime[0] = null;
+                }
+            ).onErrorContinue((e,v) -> {
+                logger.info("onError:" + e + " v: " + v + " from Thread:" + Thread.currentThread().getName());
+                long resultNanos = resultTimeRef.get().stop();
+                resultTimeRef.set(null);
                 activity.getExceptionCountMetrics().count(e.getClass().getSimpleName());
                 activity.getExceptionHistoMetrics().update(e.getClass().getSimpleName(), resultNanos);
                 handleErrorLogging(e);
-                if (!shouldRetry(e)) {
-                    pagingState = null;
-                    completion.complete(-1);
-                }
                 // update every time we get retry
                 triesHisto.update(1);
-            } finally {
-                if (resultTime[0] != null) {
-                    resultTime[0].stop();
+                completionRef.get().complete(-1);
+            }).doOnEach(e -> {
+                logger.info("doOnEach stop result timer" + e);
+                if(completionRef.get().isDone()){
+                    logger.info("completion not done, completing now; " + completionRef);
+                    completionRef.get().complete(1);
+                }else{
+                    logger.info("completion is done already");
                 }
-            }
+                if (resultTimeRef.get() != null) {
+                    resultTimeRef.get().stop();
+                }
+            }).subscribe(c -> logger.info("subscribe: " + c + "completion done: " + completionRef.get().isDone()));
+            reactiveState.setSubscription(subscription);
         }
 
+
         try {
-            Integer result = completion.get();
+            logger.info("waiting for completion" + completionRef + " from Thread:" + Thread.currentThread().getName() + " completion " + completionRef);
+            Integer result = completionRef.get().get(10, TimeUnit.SECONDS);
+            logger.info("completed" + " from Thread:" + Thread.currentThread().getName());
             triesHisto.update(1);
             return result;
-        } catch (InterruptedException | ExecutionException e) {
-            logger.error("problem while waiting for completion", e);
+        } catch (InterruptedException | ExecutionException | TimeoutException e) {
+            logger.error("problem while waiting for completion for: " + completionRef, e);
             return -1;
         }
     }
@@ -392,7 +365,6 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
     }
 
 
-
     private void handleErrorLogging(Throwable e) {
         StargateActionException sae = new StargateActionException(e);
         long now = System.currentTimeMillis();
@@ -436,7 +408,6 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
         return status != null && (status.getCode() == Status.UNAVAILABLE.getCode().value()
             || status.getCode() == Status.DEADLINE_EXCEEDED.getCode().value());
     }
-
 
 
     private boolean shouldRetry(Throwable e) {

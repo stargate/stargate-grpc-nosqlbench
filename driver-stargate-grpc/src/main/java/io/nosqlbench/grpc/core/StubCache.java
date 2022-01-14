@@ -23,7 +23,7 @@ import io.stargate.proto.ReactorStargateGrpc.ReactorStargateStub;
 import io.stargate.proto.StargateGrpc.StargateFutureStub;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.reactivestreams.Publisher;
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 
 public class StubCache implements Shutdownable {
@@ -50,11 +50,6 @@ public class StubCache implements Shutdownable {
         int numberOfEntries = reactiveState.size();
         int index = (counter.getAndUpdate(value -> (value + 1) % numberOfEntries));
         return reactiveState.get(index);
-    }
-
-
-    public Flux<QueryOuterClass.Query> getFlux(Publisher<QueryOuterClass.Query> publisher) {
-        return Flux.from(publisher);
     }
 
     /**
@@ -158,6 +153,7 @@ public class StubCache implements Shutdownable {
         NewQueryListener listener;
         final ReactorStargateStub reactorStargateStub;
         private Flux<QueryOuterClass.StreamingResponse> responseFlux;
+        private Disposable subscription;
 
         public ReactiveState(ReactorStargateStub reactorStargateStub) {
             this.reactorStargateStub = reactorStargateStub;
@@ -168,6 +164,7 @@ public class StubCache implements Shutdownable {
         }
 
         public void registerListener(NewQueryListener newQueryListener){
+            System.out.println("register new listener:" + newQueryListener);
             listener = newQueryListener;
         }
 
@@ -179,6 +176,11 @@ public class StubCache implements Shutdownable {
             return listener;
         }
 
+        public void onQuery(QueryOuterClass.Query q)  {
+            System.out.println("listener on query");
+            listener.onQuery(q);
+        }
+
         public void setResponseFlux(Flux<QueryOuterClass.StreamingResponse> responseFlux) {
             this.responseFlux = responseFlux;
 
@@ -186,6 +188,14 @@ public class StubCache implements Shutdownable {
 
         public Flux<QueryOuterClass.StreamingResponse> getResponseFlux() {
             return responseFlux;
+        }
+
+        public void setSubscription(Disposable subscription) {
+            this.subscription = subscription;
+        }
+
+        public boolean isSubscriptionCreated() {
+            return subscription!=null;
         }
     }
 }
