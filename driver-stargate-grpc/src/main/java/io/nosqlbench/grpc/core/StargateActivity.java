@@ -83,33 +83,10 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
 
     public StubCache.ReactiveState executeQueryReactive(QueryOuterClass.Query query) {
         StubCache.ReactiveState reactiveState = stubCache.getReactiveState();
-        if(reactiveState.fluxCreated()){
-            logger.info("fluxCreated. onQuery:" + query +" from Thread:" + Thread.currentThread().getName());
-            reactiveState.onQuery(query);
-            logger.info("return reactiveState.getResponseFlux(): " + reactiveState.getResponseFlux()
-                +" from Thread:" + Thread.currentThread().getName());
-            // there is already a subscription for it, don't return
-        }else{
-            Flux<QueryOuterClass.Query> flux = Flux.create(new Consumer<FluxSink<QueryOuterClass.Query>>() {
-                @Override
-                public void accept(FluxSink<QueryOuterClass.Query> sink) {
-                    reactiveState.registerListener(
-                        new NewQueryListener(sink)
-                    );
-                }
-            }).onErrorContinue((e,v) -> {
-                logger.warn("Error in the Query flux, it will continue processing.", e);
-            });
-
-            reactiveState.setQueryFlux(flux);
-
-            Flux<QueryOuterClass.StreamingResponse> responseFlux
-                = reactiveState.reactorStargateStub.executeQueryStream(flux);
-            reactiveState.onQuery(query);
-            reactiveState.setResponseFlux(responseFlux);
-            logger.info("return created responseFlux: " + responseFlux +" from Thread:" + Thread.currentThread().getName());
-            logger.info("After subscribe" +" from Thread:" + Thread.currentThread().getName());
-        }
+        //todo there should be Flux per thread
+        reactiveState.onQuery(query);
+        logger.info("return created responseFlux: " + reactiveState + " from Thread:" + Thread.currentThread().getName());
+        logger.info("After subscribe" + " from Thread:" + Thread.currentThread().getName());
         return reactiveState;
 
     }

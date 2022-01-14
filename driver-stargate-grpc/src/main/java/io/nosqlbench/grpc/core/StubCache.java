@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -25,6 +26,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
 
 public class StubCache implements Shutdownable {
     private final static Logger logger = LogManager.getLogger(StubCache.class);
@@ -149,27 +151,25 @@ public class StubCache implements Shutdownable {
     }
 
     public static class ReactiveState {
-        Flux<QueryOuterClass.Query> queryFlux;
+        private final Flux<QueryOuterClass.Query> queryFlux;
         NewQueryListener listener;
-        final ReactorStargateStub reactorStargateStub;
-        private Flux<QueryOuterClass.StreamingResponse> responseFlux;
+        private final ReactorStargateStub reactorStargateStub;
+        private final Flux<QueryOuterClass.StreamingResponse> responseFlux;
         private Disposable subscription;
 
         public ReactiveState(ReactorStargateStub reactorStargateStub) {
             this.reactorStargateStub = reactorStargateStub;
-        }
-
-        public boolean fluxCreated(){
-            return queryFlux != null;
+            this.queryFlux = Flux.create((Consumer<FluxSink<QueryOuterClass.Query>>) sink -> registerListener(
+                new NewQueryListener(sink)
+            )).onErrorContinue((e, v) -> {
+                logger.warn("Error in the Query flux, it will continue processing.", e);
+            });
+            this.responseFlux = reactorStargateStub.executeQueryStream(queryFlux);
         }
 
         public void registerListener(NewQueryListener newQueryListener){
             System.out.println("register new listener:" + newQueryListener);
             listener = newQueryListener;
-        }
-
-        public void setQueryFlux(Flux<QueryOuterClass.Query> flux) {
-            this.queryFlux = flux;
         }
 
         public NewQueryListener getListener() {
@@ -181,10 +181,6 @@ public class StubCache implements Shutdownable {
             listener.onQuery(q);
         }
 
-        public void setResponseFlux(Flux<QueryOuterClass.StreamingResponse> responseFlux) {
-            this.responseFlux = responseFlux;
-
-        }
 
         public Flux<QueryOuterClass.StreamingResponse> getResponseFlux() {
             return responseFlux;

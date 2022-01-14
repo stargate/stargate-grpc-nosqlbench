@@ -100,6 +100,7 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
         }
     }
 
+    // todo this should be per thread
     // it needs to be an atomic reference because it's updated in the flux
     private static final AtomicReference<CompletableFuture<Integer>> completionRef = new AtomicReference<>();
     private static final AtomicReference<Timer.Context> resultTimeRef = new AtomicReference<>();
