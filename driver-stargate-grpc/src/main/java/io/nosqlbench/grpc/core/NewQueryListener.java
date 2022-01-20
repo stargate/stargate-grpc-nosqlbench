@@ -14,13 +14,8 @@ public class NewQueryListener {
         this.fluxSink = fluxSink;
     }
 
-    void onQuery(QueryOuterClass.Query query){
+    void onQuery(QueryOuterClass.Query query) {
         logger.info("NewQueryListener, for fluxSink: " + fluxSink);
         fluxSink.next(query);
     }
-
-    void complete(){
-//        sink.complete();
-    }
-
 }

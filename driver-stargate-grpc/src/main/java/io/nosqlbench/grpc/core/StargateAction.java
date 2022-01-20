@@ -103,7 +103,8 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
 
         Request request = sequencer.get(cycle);
 
-       // startTimeRef.set(System.nanoTime()); it needs to be moved into executeQueryReactive()
+       // startTimeRef.set(System.nanoTime());
+       // it was moved into executeQueryReactive()
 
         StargateActivity.ReactiveState reactiveState;
 
@@ -121,27 +122,21 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
 
         try (Timer.Context ignored = executeTimer.time()) {
             Query query = queryBuilder.build();
-            logger.info("execute query: " + query + " from Thread:" + Thread.currentThread().getName());
+            // execute query, it will be propagated via listener API to the Query flux.
             reactiveState = activity.executeQueryReactive(query);
         }
-
-        reactiveState.getCompletion()
-            .handle((i,t) -> {logger.info("handle: " + i + " t: " + t); return i;})
-            .whenComplete((integer, throwable) -> logger.info("Future completed: " + integer + " throwable: " + throwable));
 
         reactiveState.setResultTimer(resultTimer.time());
 
         if (!reactiveState.isSubscriptionCreated()) {
             // build execution flow
-            logger.info("constructing flow, completable: " + reactiveState.getCompletion());
+            logger.debug("Constructing new flow");
             Disposable subscription = reactiveState.getResponseFlux().doOnNext(
                 r -> {
                     Response response = r.getResponse();
-                    logger.info("doOnNext, received: " + response + " from Thread:" + Thread.currentThread().getName());
+                    logger.debug("doOnNext, received: " + response);
                     if (response.hasResultSet()) {
                         ResultSet rs = response.getResultSet();
-                        logger.info("rs: " + rs + " from Thread:" + Thread.currentThread().getName());
-
                         request.verifierBindings().ifPresent(bindings -> {
                             // Only checking field names for now which matches the functionality of the driver-cql-shaded
                             Map<String, Object> expectedValues = bindings.getLazyMap(cycle);
@@ -163,13 +158,12 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
                     } else {
                         com.google.rpc.Status status = r.getStatus();
                         if (status.getCode() == 0) {
-                            logger.info("Success without result set" + " from Thread:" + Thread.currentThread().getName());
                             // it is a success response without any result set
                             resultSuccessTimer
                                 .update(System.nanoTime() - reactiveState.getStartTime(), TimeUnit.NANOSECONDS);
                             reactiveState.complete(0);
                         } else {
-                            logger.info("Error, code: " + status.getCode() + " from Thread:" + Thread.currentThread().getName());
+                            logger.warn("Error, message: " + status.getMessage());
                             // it is an error
                             long resultNanos = reactiveState.stopResultSetTimer();
                             reactiveState.clearResultSetTimer();
@@ -183,7 +177,7 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
 
                 }
             ).onErrorContinue((e,v) -> {
-                logger.info("onError:" + e + " v: " + v + " from Thread:" + Thread.currentThread().getName());
+                logger.warn("onError, for value: " + v + " it will continue the processing.", e);
                 long resultNanos = reactiveState.stopResultSetTimer();
                 reactiveState.clearResultSetTimer();
                 activity.getExceptionCountMetrics().count(e.getClass().getSimpleName());
@@ -193,23 +187,19 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
                 triesHisto.update(1);
                 reactiveState.complete(-1);
             }).doOnEach(e -> {
-                logger.info("doOnEach stop result timer" + e);
                 if(reactiveState.isDone()){
-                    logger.info("completion not done, completing now; " + reactiveState.getCompletion());
                     reactiveState.complete(1);
-                }else{
-                    logger.info("completion is done already");
                 }
                 reactiveState.stopResultSetTimer();
-            }).subscribe(c -> logger.info("subscribe: " + c + "completion done: " + reactiveState.isDone()));
+            }).subscribe();
+            // The whole reactive workflow is assembled and the new subscription is created only for the first invocation per thread.
+            // Once it is created, this workflow is reused and the queries are propagated via listener API.
             reactiveState.setSubscription(subscription);
         }
 
-
         try {
-            logger.info("waiting for completion" + reactiveState.getCompletion() + " from Thread:" + Thread.currentThread().getName() + " completion " + reactiveState.getCompletion());
+            logger.debug("waiting for completion: {} from Thread: {}", reactiveState.getCompletion(),Thread.currentThread().getName());
             Integer result = reactiveState.getCompletion().get(10, TimeUnit.SECONDS);
-            logger.info("completed" + " from Thread:" + Thread.currentThread().getName());
             triesHisto.update(1);
             return result;
         } catch (InterruptedException | ExecutionException | TimeoutException e) {

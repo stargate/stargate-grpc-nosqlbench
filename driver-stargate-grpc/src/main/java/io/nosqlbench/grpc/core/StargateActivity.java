@@ -60,6 +60,9 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
     private ConcurrentHashMap<StargateActionException, ExceptionMetaData> exceptionInfo = new ConcurrentHashMap<>();
     private ConcurrentHashMap<ReactiveStargateActionException, ExceptionMetaData> reactiveExceptionInfo = new ConcurrentHashMap<>();
 
+    // stores reactive state per nb thread
+    private static final ThreadLocal<ReactiveState> REACTIVE_STATE_PER_THREAD = new ThreadLocal<>();
+
     public static final long MILLIS_BETWEEN_SIMILAR_ERROR = 1000 * 60 * 5; // 5 minutes
     private final ExceptionCountMetrics exceptionCountMetrics;
     private final ExceptionHistoMetrics exceptionHistoMetrics;
@@ -85,20 +88,19 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
         return stubCache.get();
     }
 
-    private static ThreadLocal<ReactiveState> reactiveStatePerThread = new ThreadLocal<>();
-
     public ReactiveState executeQueryReactive(QueryOuterClass.Query query) {
-        if(reactiveStatePerThread.get() == null){
+        // if the given nb thread did not start reactive bi_streaming yet:
+        if(REACTIVE_STATE_PER_THREAD.get() == null){
             ReactorStargateGrpc.ReactorStargateStub reactorStub = stubCache.getReactorStub();
             ReactiveState reactiveState = new ReactiveState(reactorStub);
-            reactiveStatePerThread.set(reactiveState);
+            REACTIVE_STATE_PER_THREAD.set(reactiveState);
             execute(query, reactiveState);
-            logger.info("return created responseFlux: " + reactiveState + " from Thread:" + Thread.currentThread().getName());
-            logger.info("After subscribe" + " from Thread:" + Thread.currentThread().getName());
+            logger.debug("return created reactiveState: " + reactiveState);
             return reactiveState;
         } else{
-            logger.info("Returning existing {} from Thread: {} ", reactiveStatePerThread.get() ,Thread.currentThread().getName());
-            ReactiveState reactiveState = reactiveStatePerThread.get();
+            // bi_streaming was already started
+            logger.debug("Returning reactiveState existing {} ", REACTIVE_STATE_PER_THREAD.get());
+            ReactiveState reactiveState = REACTIVE_STATE_PER_THREAD.get();
             execute(query, reactiveState);
             return reactiveState;
         }
@@ -364,20 +366,17 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
 
 
     public static class ReactiveState {
-        private final Flux<QueryOuterClass.Query> queryFlux;
         NewQueryListener listener;
-        private final ReactorStargateGrpc.ReactorStargateStub reactorStargateStub;
         private final Flux<QueryOuterClass.StreamingResponse> responseFlux;
         private Disposable subscription;
-        // todo this should be per thread
-        // it needs to be an atomic reference because it's updated in the flux
         private final AtomicReference<CompletableFuture<Integer>> completionRef = new AtomicReference<>();
         private final AtomicReference<Timer.Context> resultTimeRef = new AtomicReference<>();
         private final AtomicReference<Long> startTimeRef = new AtomicReference<>();
 
         public ReactiveState(ReactorStargateGrpc.ReactorStargateStub reactorStargateStub) {
-            this.reactorStargateStub = reactorStargateStub;
-            this.queryFlux = Flux.create((Consumer<FluxSink<QueryOuterClass.Query>>) sink -> registerListener(
+            // create new Query flux and register the NewQueryListener.
+            // The listener will be used to propagate Queries via bi_directional streaming.
+            Flux<QueryOuterClass.Query> queryFlux = Flux.create((Consumer<FluxSink<QueryOuterClass.Query>>) sink -> registerListener(
                 new NewQueryListener(sink)
             )).onErrorContinue((e, v) -> {
                 logger.warn("Error in the Query flux, it will continue processing.", e);
@@ -386,16 +385,11 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
         }
 
         public void registerListener(NewQueryListener newQueryListener){
-            System.out.println("register new listener:" + newQueryListener);
+            logger.debug("registering new listener: {}",newQueryListener);
             listener = newQueryListener;
         }
 
-        public NewQueryListener getListener() {
-            return listener;
-        }
-
         public void onQuery(QueryOuterClass.Query q)  {
-            System.out.println("listener on query");
             listener.onQuery(q);
         }
 
@@ -405,6 +399,9 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
         }
 
         public void setSubscription(Disposable subscription) {
+            if(this.subscription != null){
+                throw new IllegalStateException("Only one subscription is allowed");
+            }
             this.subscription = subscription;
         }
 
