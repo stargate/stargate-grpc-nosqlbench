@@ -15,24 +15,18 @@ import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
-import io.stargate.proto.QueryOuterClass;
 import io.stargate.proto.ReactorStargateGrpc.ReactorStargateStub;
 import io.stargate.proto.StargateGrpc.StargateFutureStub;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import reactor.core.Disposable;
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.FluxSink;
 
 public class StubCache implements Shutdownable {
     private final static Logger logger = LogManager.getLogger(StubCache.class);
 
     Map<Integer, StargateFutureStub> futureStubs = Maps.newConcurrentMap();
-    Map<Integer, ReactiveState> reactiveState = Maps.newConcurrentMap();
+    Map<Integer, ReactorStargateStub> reactorStubs = Maps.newConcurrentMap();
     AtomicInteger counter = new AtomicInteger();
 
     /**
@@ -44,14 +38,14 @@ public class StubCache implements Shutdownable {
         return futureStubs.get(index);
     }
 
+
     /**
-     *
-     * @return the ReactiveState associated in a round-robin fashion
+     * @return the ReactorStargateStub in a round-robin fashion
      */
-    public ReactiveState getReactiveState() {
-        int numberOfEntries = reactiveState.size();
+    public ReactorStargateStub getReactorStub() {
+        int numberOfEntries = reactorStubs.size();
         int index = (counter.getAndUpdate(value -> (value + 1) % numberOfEntries));
-        return reactiveState.get(index);
+        return reactorStubs.get(index);
     }
 
     /**
@@ -64,8 +58,7 @@ public class StubCache implements Shutdownable {
                       int numberOfConcurrentClients) {
         for(int i = 0; i < numberOfConcurrentClients; i++){
             futureStubs.computeIfAbsent(i, (k) -> build(def, constructFutureStub));
-            reactiveState.computeIfAbsent(i, (k) -> new ReactiveState(build(def,
-                constructReactiveStub)));
+            reactorStubs.computeIfAbsent(i, (k) -> build(def, constructReactiveStub));
         }
     }
 
@@ -107,7 +100,7 @@ public class StubCache implements Shutdownable {
         for (StargateFutureStub stub : futureStubs.values()) {
             close(stub);
         }
-        for (ReactorStargateStub stub : reactiveState.values().stream().map(v->v.reactorStargateStub).collect(Collectors.toList())) {
+        for (ReactorStargateStub stub : reactorStubs.values()) {
             close(stub);
         }
     }
@@ -150,48 +143,4 @@ public class StubCache implements Shutdownable {
         public void thisUsesUnstableApi() {}
     }
 
-    public static class ReactiveState {
-        private final Flux<QueryOuterClass.Query> queryFlux;
-        NewQueryListener listener;
-        private final ReactorStargateStub reactorStargateStub;
-        private final Flux<QueryOuterClass.StreamingResponse> responseFlux;
-        private Disposable subscription;
-
-        public ReactiveState(ReactorStargateStub reactorStargateStub) {
-            this.reactorStargateStub = reactorStargateStub;
-            this.queryFlux = Flux.create((Consumer<FluxSink<QueryOuterClass.Query>>) sink -> registerListener(
-                new NewQueryListener(sink)
-            )).onErrorContinue((e, v) -> {
-                logger.warn("Error in the Query flux, it will continue processing.", e);
-            });
-            this.responseFlux = reactorStargateStub.executeQueryStream(queryFlux);
-        }
-
-        public void registerListener(NewQueryListener newQueryListener){
-            System.out.println("register new listener:" + newQueryListener);
-            listener = newQueryListener;
-        }
-
-        public NewQueryListener getListener() {
-            return listener;
-        }
-
-        public void onQuery(QueryOuterClass.Query q)  {
-            System.out.println("listener on query");
-            listener.onQuery(q);
-        }
-
-
-        public Flux<QueryOuterClass.StreamingResponse> getResponseFlux() {
-            return responseFlux;
-        }
-
-        public void setSubscription(Disposable subscription) {
-            this.subscription = subscription;
-        }
-
-        public boolean isSubscriptionCreated() {
-            return subscription!=null;
-        }
-    }
 }

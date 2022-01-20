@@ -37,6 +37,7 @@ import io.stargate.proto.StargateGrpc;
 import io.stargate.proto.StargateGrpc.StargateFutureStub;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
 
@@ -81,14 +82,23 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
         return stubCache.get();
     }
 
-    public StubCache.ReactiveState executeQueryReactive(QueryOuterClass.Query query) {
-        StubCache.ReactiveState reactiveState = stubCache.getReactiveState();
-        //todo there should be Flux per thread
-        reactiveState.onQuery(query);
-        logger.info("return created responseFlux: " + reactiveState + " from Thread:" + Thread.currentThread().getName());
-        logger.info("After subscribe" + " from Thread:" + Thread.currentThread().getName());
-        return reactiveState;
+    private static ThreadLocal<ReactiveState> reactiveStatePerThread = new ThreadLocal<>();
 
+    public ReactiveState executeQueryReactive(QueryOuterClass.Query query) {
+        if(reactiveStatePerThread.get() == null){
+            ReactorStargateGrpc.ReactorStargateStub reactorStub = stubCache.getReactorStub();
+            ReactiveState reactiveState = new ReactiveState(reactorStub);
+            reactiveStatePerThread.set(reactiveState);
+            reactiveState.onQuery(query);
+            logger.info("return created responseFlux: " + reactiveState + " from Thread:" + Thread.currentThread().getName());
+            logger.info("After subscribe" + " from Thread:" + Thread.currentThread().getName());
+            return reactiveState;
+        } else{
+            logger.info("Returning existing {} from Thread: {} ", reactiveStatePerThread.get() ,Thread.currentThread().getName());
+            ReactiveState reactiveState = reactiveStatePerThread.get();
+            reactiveState.onQuery(query);
+            return reactiveState;
+        }
     }
 
     @Override
@@ -343,4 +353,49 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
         return unfiltered;
     }
 
+
+    public static class ReactiveState {
+        private final Flux<QueryOuterClass.Query> queryFlux;
+        NewQueryListener listener;
+        private final ReactorStargateGrpc.ReactorStargateStub reactorStargateStub;
+        private final Flux<QueryOuterClass.StreamingResponse> responseFlux;
+        private Disposable subscription;
+
+        public ReactiveState(ReactorStargateGrpc.ReactorStargateStub reactorStargateStub) {
+            this.reactorStargateStub = reactorStargateStub;
+            this.queryFlux = Flux.create((Consumer<FluxSink<QueryOuterClass.Query>>) sink -> registerListener(
+                new NewQueryListener(sink)
+            )).onErrorContinue((e, v) -> {
+                logger.warn("Error in the Query flux, it will continue processing.", e);
+            });
+            this.responseFlux = reactorStargateStub.executeQueryStream(queryFlux);
+        }
+
+        public void registerListener(NewQueryListener newQueryListener){
+            System.out.println("register new listener:" + newQueryListener);
+            listener = newQueryListener;
+        }
+
+        public NewQueryListener getListener() {
+            return listener;
+        }
+
+        public void onQuery(QueryOuterClass.Query q)  {
+            System.out.println("listener on query");
+            listener.onQuery(q);
+        }
+
+
+        public Flux<QueryOuterClass.StreamingResponse> getResponseFlux() {
+            return responseFlux;
+        }
+
+        public void setSubscription(Disposable subscription) {
+            this.subscription = subscription;
+        }
+
+        public boolean isSubscriptionCreated() {
+            return subscription!=null;
+        }
+    }
 }

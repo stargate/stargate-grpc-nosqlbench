@@ -118,7 +118,7 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
             .handle((i,t) -> {logger.info("handle: " + i + " t: " + t); return i;})
             .whenComplete((integer, throwable) -> logger.info("Future completed: " + integer + " throwable: " + throwable));
 
-        StubCache.ReactiveState reactiveState;
+        StargateActivity.ReactiveState reactiveState;
 
         QueryParameters.Builder paramsBuilder = QueryParameters.newBuilder();
         request.consistency().ifPresent(cl -> paramsBuilder.setConsistency(ConsistencyValue.newBuilder().setValue(cl)));
