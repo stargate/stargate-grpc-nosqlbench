@@ -26,11 +26,9 @@ import io.stargate.proto.StargateGrpc.StargateFutureStub;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import org.apache.logging.log4j.LogManager;
@@ -100,23 +98,12 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
         }
     }
 
-    // todo this should be per thread
-    // it needs to be an atomic reference because it's updated in the flux
-    private static final AtomicReference<CompletableFuture<Integer>> completionRef = new AtomicReference<>();
-    private static final AtomicReference<Timer.Context> resultTimeRef = new AtomicReference<>();
-    private static final AtomicReference<Long> startTimeRef = new AtomicReference<>();
     private int runStreaming(long cycle) {
         logger.info("runStreaming called with cycle: " + cycle);
 
-        completionRef.set(new CompletableFuture<>());
         Request request = sequencer.get(cycle);
 
-        startTimeRef.set(System.nanoTime());
-
-        completionRef
-            .get()
-            .handle((i,t) -> {logger.info("handle: " + i + " t: " + t); return i;})
-            .whenComplete((integer, throwable) -> logger.info("Future completed: " + integer + " throwable: " + throwable));
+       // startTimeRef.set(System.nanoTime()); it needs to be moved into executeQueryReactive()
 
         StargateActivity.ReactiveState reactiveState;
 
@@ -134,15 +121,19 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
 
         try (Timer.Context ignored = executeTimer.time()) {
             Query query = queryBuilder.build();
-            logger.info("execute query: " + query + " from Thread:" + Thread.currentThread().getName() + " completion: " + completionRef);
+            logger.info("execute query: " + query + " from Thread:" + Thread.currentThread().getName());
             reactiveState = activity.executeQueryReactive(query);
         }
 
-        resultTimeRef.set(resultTimer.time());
+        reactiveState.getCompletion()
+            .handle((i,t) -> {logger.info("handle: " + i + " t: " + t); return i;})
+            .whenComplete((integer, throwable) -> logger.info("Future completed: " + integer + " throwable: " + throwable));
+
+        reactiveState.setResultTimer(resultTimer.time());
 
         if (!reactiveState.isSubscriptionCreated()) {
             // build execution flow
-            logger.info("constructing flow, completable: " + completionRef);
+            logger.info("constructing flow, completable: " + reactiveState.getCompletion());
             Disposable subscription = reactiveState.getResponseFlux().doOnNext(
                 r -> {
                     Response response = r.getResponse();
@@ -166,8 +157,8 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
                         });
 
                         resultSuccessTimer
-                            .update(System.nanoTime() - startTimeRef.get(), TimeUnit.NANOSECONDS);
-                        completionRef.get().complete(0);
+                            .update(System.nanoTime() - reactiveState.getStartTime(), TimeUnit.NANOSECONDS);
+                        reactiveState.complete(0);
 
                     } else {
                         com.google.rpc.Status status = r.getStatus();
@@ -175,56 +166,54 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
                             logger.info("Success without result set" + " from Thread:" + Thread.currentThread().getName());
                             // it is a success response without any result set
                             resultSuccessTimer
-                                .update(System.nanoTime() - startTimeRef.get(), TimeUnit.NANOSECONDS);
-                            completionRef.get().complete(0);
+                                .update(System.nanoTime() - reactiveState.getStartTime(), TimeUnit.NANOSECONDS);
+                            reactiveState.complete(0);
                         } else {
                             logger.info("Error, code: " + status.getCode() + " from Thread:" + Thread.currentThread().getName());
                             // it is an error
-                            long resultNanos = resultTimeRef.get().stop();
-                            resultTimeRef.set(null);
+                            long resultNanos = reactiveState.stopResultSetTimer();
+                            reactiveState.clearResultSetTimer();
                             activity.getExceptionCountMetrics().count(status.getMessage());
                             activity.getExceptionHistoMetrics().update(status.getMessage(), resultNanos);
                             handleErrorLogging(status);
                             triesHisto.update(1);
-                            completionRef.get().complete(-1);
+                            reactiveState.complete(-1);
                         }
                     }
 
                 }
             ).onErrorContinue((e,v) -> {
                 logger.info("onError:" + e + " v: " + v + " from Thread:" + Thread.currentThread().getName());
-                long resultNanos = resultTimeRef.get().stop();
-                resultTimeRef.set(null);
+                long resultNanos = reactiveState.stopResultSetTimer();
+                reactiveState.clearResultSetTimer();
                 activity.getExceptionCountMetrics().count(e.getClass().getSimpleName());
                 activity.getExceptionHistoMetrics().update(e.getClass().getSimpleName(), resultNanos);
                 handleErrorLogging(e);
                 // update every time we get retry
                 triesHisto.update(1);
-                completionRef.get().complete(-1);
+                reactiveState.complete(-1);
             }).doOnEach(e -> {
                 logger.info("doOnEach stop result timer" + e);
-                if(completionRef.get().isDone()){
-                    logger.info("completion not done, completing now; " + completionRef);
-                    completionRef.get().complete(1);
+                if(reactiveState.isDone()){
+                    logger.info("completion not done, completing now; " + reactiveState.getCompletion());
+                    reactiveState.complete(1);
                 }else{
                     logger.info("completion is done already");
                 }
-                if (resultTimeRef.get() != null) {
-                    resultTimeRef.get().stop();
-                }
-            }).subscribe(c -> logger.info("subscribe: " + c + "completion done: " + completionRef.get().isDone()));
+                reactiveState.stopResultSetTimer();
+            }).subscribe(c -> logger.info("subscribe: " + c + "completion done: " + reactiveState.isDone()));
             reactiveState.setSubscription(subscription);
         }
 
 
         try {
-            logger.info("waiting for completion" + completionRef + " from Thread:" + Thread.currentThread().getName() + " completion " + completionRef);
-            Integer result = completionRef.get().get(10, TimeUnit.SECONDS);
+            logger.info("waiting for completion" + reactiveState.getCompletion() + " from Thread:" + Thread.currentThread().getName() + " completion " + reactiveState.getCompletion());
+            Integer result = reactiveState.getCompletion().get(10, TimeUnit.SECONDS);
             logger.info("completed" + " from Thread:" + Thread.currentThread().getName());
             triesHisto.update(1);
             return result;
         } catch (InterruptedException | ExecutionException | TimeoutException e) {
-            logger.error("problem while waiting for completion for: " + completionRef, e);
+            logger.error("problem while waiting for completion for: " + reactiveState.getCompletion(), e);
             return -1;
         }
     }

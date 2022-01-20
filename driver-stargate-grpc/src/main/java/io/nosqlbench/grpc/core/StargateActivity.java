@@ -1,5 +1,6 @@
 package io.nosqlbench.grpc.core;
 
+import com.codahale.metrics.Timer;
 import io.nosqlbench.activitytype.cql.statements.core.AvailableCQLStatements;
 import io.nosqlbench.activitytype.cql.statements.core.CQLStatementDef;
 import io.nosqlbench.activitytype.cql.statements.core.TaggedCQLStatementDefs;
@@ -45,7 +46,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 @SuppressWarnings("Duplicates")
@@ -89,16 +92,22 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
             ReactorStargateGrpc.ReactorStargateStub reactorStub = stubCache.getReactorStub();
             ReactiveState reactiveState = new ReactiveState(reactorStub);
             reactiveStatePerThread.set(reactiveState);
-            reactiveState.onQuery(query);
+            execute(query, reactiveState);
             logger.info("return created responseFlux: " + reactiveState + " from Thread:" + Thread.currentThread().getName());
             logger.info("After subscribe" + " from Thread:" + Thread.currentThread().getName());
             return reactiveState;
         } else{
             logger.info("Returning existing {} from Thread: {} ", reactiveStatePerThread.get() ,Thread.currentThread().getName());
             ReactiveState reactiveState = reactiveStatePerThread.get();
-            reactiveState.onQuery(query);
+            execute(query, reactiveState);
             return reactiveState;
         }
+    }
+
+    private void execute(QueryOuterClass.Query query, ReactiveState reactiveState) {
+        reactiveState.startTimeRef.set(System.nanoTime());
+        reactiveState.onQuery(query);
+        reactiveState.completionRef.set(new CompletableFuture<>());
     }
 
     @Override
@@ -360,6 +369,11 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
         private final ReactorStargateGrpc.ReactorStargateStub reactorStargateStub;
         private final Flux<QueryOuterClass.StreamingResponse> responseFlux;
         private Disposable subscription;
+        // todo this should be per thread
+        // it needs to be an atomic reference because it's updated in the flux
+        private final AtomicReference<CompletableFuture<Integer>> completionRef = new AtomicReference<>();
+        private final AtomicReference<Timer.Context> resultTimeRef = new AtomicReference<>();
+        private final AtomicReference<Long> startTimeRef = new AtomicReference<>();
 
         public ReactiveState(ReactorStargateGrpc.ReactorStargateStub reactorStargateStub) {
             this.reactorStargateStub = reactorStargateStub;
@@ -396,6 +410,38 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
 
         public boolean isSubscriptionCreated() {
             return subscription!=null;
+        }
+
+        public void setResultTimer(Timer.Context time) {
+            resultTimeRef.set(time);
+        }
+
+        public void complete(int responseCode) {
+            completionRef.get().complete(responseCode);
+        }
+
+        public boolean isDone() {
+            return completionRef.get().isDone();
+        }
+
+        public CompletableFuture<Integer> getCompletion() {
+            return completionRef.get();
+        }
+
+        public void clearResultSetTimer() {
+            resultTimeRef.set(null);
+        }
+
+        public long stopResultSetTimer() {
+            if(resultTimeRef.get() != null) {
+                return resultTimeRef.get().stop();
+            } else {
+                return -1;
+            }
+        }
+
+        public long getStartTime() {
+            return startTimeRef.get();
         }
     }
 }
