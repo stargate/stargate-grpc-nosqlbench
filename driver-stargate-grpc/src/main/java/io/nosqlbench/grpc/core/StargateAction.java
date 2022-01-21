@@ -72,7 +72,6 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
 
     @Override
     public void init() {
-        logger.info("Creating new StargateAction");
         onActivityDefUpdate(activityDef);
         this.sequencer = activity.getOpSequencer();
         this.bindTimer = activity.getInstrumentation().getOrCreateBindTimer();
@@ -99,8 +98,6 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
     }
 
     private int runStreaming(long cycle) {
-        logger.info("runStreaming called with cycle: " + cycle);
-
         Request request = sequencer.get(cycle);
 
        // startTimeRef.set(System.nanoTime());
