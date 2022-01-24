@@ -433,7 +433,7 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
             if(resultTimeRef.get() != null) {
                 return resultTimeRef.get().stop();
             } else {
-                return -1;
+                return 0;
             }
         }
 
