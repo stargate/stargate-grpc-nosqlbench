@@ -160,12 +160,12 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
                                 .update(System.nanoTime() - reactiveState.getStartTime(), TimeUnit.NANOSECONDS);
                             reactiveState.complete(0);
                         } else {
-                            logger.warn("Error, message: " + status.getMessage());
+                            logger.debug("Error, message: " + status.getMessage());
                             // it is an error
                             long resultNanos = reactiveState.stopResultSetTimer();
                             reactiveState.clearResultSetTimer();
-                            activity.getExceptionCountMetrics().count(status.getMessage());
-                            activity.getExceptionHistoMetrics().update(status.getMessage(), resultNanos);
+                            activity.getExceptionCountMetrics().count(String.valueOf(status.getCode()));
+                            activity.getExceptionHistoMetrics().update(String.valueOf(status.getCode()), resultNanos);
                             handleErrorLogging(status);
                             triesHisto.update(1);
                             reactiveState.complete(-1);
