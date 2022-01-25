@@ -28,6 +28,7 @@ public class StubCache implements Shutdownable {
     Map<Integer, StargateFutureStub> futureStubs = Maps.newConcurrentMap();
     Map<Integer, ReactorStargateStub> reactorStubs = Maps.newConcurrentMap();
     AtomicInteger counter = new AtomicInteger();
+    private static AtomicInteger hostsCounter = new AtomicInteger();
 
     /**
      * @return the AbstractStub in a round-robin fashion
@@ -75,6 +76,8 @@ public class StubCache implements Shutdownable {
         // It is most convenient to call this `auth_token` because the NoSQLBench module running with Fallout already uses the name auth_token for other Stargate activities
         String token = def.getParams().getOptionalString("auth_token").orElseThrow(() -> new RuntimeException("No auth token configured for gRPC driver"));
 
+        host = getHost(host);
+
         logger.info("Building channel for host: {} port: {} token: {} usePlaintext: {} " , host, port, token, usePlaintext);
         ManagedChannel channel;
         if(usePlaintext) {
@@ -93,6 +96,20 @@ public class StubCache implements Shutdownable {
         return construct.apply(channel).withCallCredentials(new StargateBearerToken(token));
     }
 
+    static String getHost(String host) {
+        if(host.contains(",")){
+            // there is more than one host, separated by ,
+            String[] hosts = host.split(",");
+            logger.info("The host: {} contains {} entries", host, hosts.length);
+            int numberOfEntries = hosts.length;
+            int index = (hostsCounter.getAndUpdate(value -> (value + 1) % numberOfEntries));
+            logger.info("Returning host: {} ", hosts[index]);
+            return hosts[index];
+        }else{
+            logger.info("Returning host as is: {} ", host);
+            return host;
+        }
+    }
 
 
     @Override
