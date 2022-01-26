@@ -22,14 +22,18 @@ import io.stargate.proto.QueryOuterClass.Response;
 import io.stargate.proto.QueryOuterClass.ResultSet;
 import io.stargate.proto.QueryOuterClass.Values;
 import io.stargate.proto.StargateGrpc.StargateFutureStub;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import reactor.core.Disposable;
 
 @SuppressWarnings("Duplicates")
 public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDefObserver {
@@ -57,6 +61,8 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
 
     private int numPages;
 
+    private boolean biStreaming;
+
     public StargateAction(ActivityDef activityDef, int slot, StargateActivity cqlActivity) {
         this.activityDef = activityDef;
         this.activity = cqlActivity;
@@ -73,6 +79,8 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
         this.resultTimer = activity.getInstrumentation().getOrCreateResultTimer();
         this.resultSuccessTimer = activity.getInstrumentation().getOrCreateResultSuccessTimer();
         this.triesHisto = activity.getInstrumentation().getOrCreateTriesHistogram();
+        this.biStreaming = activity.getParams()
+            .getOptionalBoolean("bi_streaming").orElse(false);
     }
 
     @Override
@@ -82,6 +90,122 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
 
     @Override
     public int runPhase(long cycle) {
+        if (biStreaming) {
+            return runStreaming(cycle);
+        } else {
+            return runStandard(cycle);
+        }
+    }
+
+    private int runStreaming(long cycle) {
+        Request request = sequencer.get(cycle);
+
+       // startTimeRef.set(System.nanoTime());
+       // it was moved into executeQueryReactive()
+
+        StargateActivity.ReactiveState reactiveState;
+
+        QueryParameters.Builder paramsBuilder = QueryParameters.newBuilder();
+        request.consistency().ifPresent(cl -> paramsBuilder.setConsistency(ConsistencyValue.newBuilder().setValue(cl)));
+        request.serialConsistency().ifPresent(cl -> paramsBuilder.setSerialConsistency(ConsistencyValue.newBuilder().setValue(cl)));
+        Query.Builder queryBuilder = Query.newBuilder().setCql(request.cql());
+
+        try (Timer.Context ignored = bindTimer.time()) {
+            Values values = request.bindings().bind(cycle);
+            if (values != null) {
+                queryBuilder.setValues(values);
+            }
+        }
+
+        try (Timer.Context ignored = executeTimer.time()) {
+            Query query = queryBuilder.build();
+            // execute query, it will be propagated via listener API to the Query flux.
+            reactiveState = activity.executeQueryReactive(query);
+        }
+
+        reactiveState.setResultTimer(resultTimer.time());
+
+        if (!reactiveState.isSubscriptionCreated()) {
+            // build execution flow
+            logger.debug("Constructing new flow");
+            Disposable subscription = reactiveState.getResponseFlux().doOnNext(
+                r -> {
+                    Response response = r.getResponse();
+                    logger.debug("doOnNext, received: " + response);
+                    if (response.hasResultSet()) {
+                        ResultSet rs = response.getResultSet();
+                        request.verifierBindings().ifPresent(bindings -> {
+                            // Only checking field names for now which matches the functionality of the driver-cql-shaded
+                            Map<String, Object> expectedValues = bindings.getLazyMap(cycle);
+                            Set<String> fields = rs.getColumnsList().stream()
+                                .map(ColumnSpec::getName).collect(Collectors.toSet());
+                            List<String> missingFields = expectedValues.keySet().stream()
+                                .filter(k -> !fields.contains(k)).collect(Collectors.toList());
+                            if (!missingFields.isEmpty()) {
+                                throw new RuntimeException(
+                                    String.format("Missing columns %s on cycle %d",
+                                        String.join(", ", missingFields), cycle));
+                            }
+                        });
+
+                        resultSuccessTimer
+                            .update(System.nanoTime() - reactiveState.getStartTime(), TimeUnit.NANOSECONDS);
+                        reactiveState.complete(0);
+
+                    } else {
+                        com.google.rpc.Status status = r.getStatus();
+                        if (status.getCode() == 0) {
+                            // it is a success response without any result set
+                            resultSuccessTimer
+                                .update(System.nanoTime() - reactiveState.getStartTime(), TimeUnit.NANOSECONDS);
+                            reactiveState.complete(0);
+                        } else {
+                            logger.debug("Error, message: " + status.getMessage());
+                            // it is an error
+                            long resultNanos = reactiveState.stopResultSetTimer();
+                            reactiveState.clearResultSetTimer();
+                            activity.getExceptionCountMetrics().count(String.valueOf(status.getCode()));
+                            activity.getExceptionHistoMetrics().update(String.valueOf(status.getCode()), resultNanos);
+                            handleErrorLogging(status);
+                            triesHisto.update(1);
+                            reactiveState.complete(-1);
+                        }
+                    }
+
+                }
+            ).onErrorContinue((e,v) -> {
+                logger.warn("onError, for value: " + v + " it will continue the processing.", e);
+                long resultNanos = reactiveState.stopResultSetTimer();
+                reactiveState.clearResultSetTimer();
+                activity.getExceptionCountMetrics().count(e.getClass().getSimpleName());
+                activity.getExceptionHistoMetrics().update(e.getClass().getSimpleName(), resultNanos);
+                handleErrorLogging(e);
+                // update every time we get retry
+                triesHisto.update(1);
+                reactiveState.complete(-1);
+            }).doOnEach(e -> {
+                if(reactiveState.isDone()){
+                    reactiveState.complete(1);
+                }
+                reactiveState.stopResultSetTimer();
+            }).subscribe();
+            // The whole reactive workflow is assembled and the new subscription is created only for the first invocation per thread.
+            // Once it is created, this workflow is reused and the queries are propagated via listener API.
+            reactiveState.setSubscription(subscription);
+        }
+
+        try {
+            logger.debug("waiting for completion: {} from Thread: {}", reactiveState.getCompletion(),Thread.currentThread().getName());
+            Integer result = reactiveState.getCompletion().get(10, TimeUnit.SECONDS);
+            triesHisto.update(1);
+            return result;
+        } catch (InterruptedException | ExecutionException | TimeoutException e) {
+            logger.error("problem while waiting for completion for: " + reactiveState.getCompletion(), e);
+            return -1;
+        }
+    }
+
+    private int runStandard(long cycle) {
         Request request = sequencer.get(cycle);
 
         StargateFutureStub stub = activity
@@ -198,7 +322,27 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
         return 0;
     }
 
-    private void handleErrorLogging(Exception e) {
+
+    private void handleErrorLogging(com.google.rpc.Status status) {
+        ReactiveStargateActionException sae = new ReactiveStargateActionException(status.getMessage(), status.getCode());
+        long now = System.currentTimeMillis();
+        if (this.activity.getReactiveExceptionInfo().containsKey(sae)) {
+            ExceptionMetaData metadata = this.activity.getReactiveExceptionInfo().get(sae);
+            if (now - metadata.timeWritten() > StargateActivity.MILLIS_BETWEEN_SIMILAR_ERROR) {
+                String numberOfMessages = String.format("[%d times]", metadata.numSquelchedInstances());
+                logger.error("Unable to retry request with errors " + numberOfMessages + " " + sae);
+                this.activity.getReactiveExceptionInfo().compute(sae, (key, value) -> new ExceptionMetaData());
+            } else {
+                this.activity.getReactiveExceptionInfo().computeIfPresent(sae, (key, value) -> value.increment());
+            }
+        } else {
+            logger.error("Unable to retry request with error [first encounter]" + " " + sae);
+            this.activity.getReactiveExceptionInfo().put(sae, new ExceptionMetaData());
+        }
+    }
+
+
+    private void handleErrorLogging(Throwable e) {
         StargateActionException sae = new StargateActionException(e);
         long now = System.currentTimeMillis();
         if (this.activity.getExceptionInfo().containsKey(sae)) {
@@ -208,7 +352,7 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
                 logger.error("Unable to retry request with errors " + numberOfMessages, e);
                 this.activity.getExceptionInfo().compute(sae, (key, value) -> new ExceptionMetaData());
             } else {
-                this.activity.getExceptionInfo().compute(sae, (key, value) -> value.increment());
+                this.activity.getExceptionInfo().computeIfPresent(sae, (key, value) -> value.increment());
             }
         } else {
             logger.error("Unable to retry request with error [first encounter]", e);
@@ -235,7 +379,15 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
         return "StargateAction[" + this.slot + "]";
     }
 
-    private boolean shouldRetry(Exception e) {
+
+    private boolean shouldRetry(com.google.rpc.Status status) {
+        // Retry if there's an unavailable exception or read/write timeout
+        return status != null && (status.getCode() == Status.UNAVAILABLE.getCode().value()
+            || status.getCode() == Status.DEADLINE_EXCEEDED.getCode().value());
+    }
+
+
+    private boolean shouldRetry(Throwable e) {
         Status status = null;
         if (e instanceof StatusException) {
             status = ((StatusException) e).getStatus();
@@ -243,9 +395,9 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
             status = ((StatusRuntimeException) e).getStatus();
         } else if (e instanceof ExecutionException) {
             Throwable cause = e.getCause();
-            if (cause != null && cause instanceof StatusException) {
+            if (cause instanceof StatusException) {
                 status = ((StatusException) cause).getStatus();
-            } else if (cause != null && cause instanceof StatusRuntimeException) {
+            } else if (cause instanceof StatusRuntimeException) {
                 status = ((StatusRuntimeException) cause).getStatus();
             }
         }

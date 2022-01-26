@@ -1,5 +1,6 @@
 package io.nosqlbench.grpc.core;
 
+import com.codahale.metrics.Timer;
 import io.nosqlbench.activitytype.cql.statements.core.AvailableCQLStatements;
 import io.nosqlbench.activitytype.cql.statements.core.CQLStatementDef;
 import io.nosqlbench.activitytype.cql.statements.core.TaggedCQLStatementDefs;
@@ -29,17 +30,26 @@ import io.nosqlbench.grpc.binders.ValuesBinder;
 import io.nosqlbench.nb.api.errors.BasicError;
 import io.nosqlbench.virtdata.core.bindings.BindingsTemplate;
 import io.nosqlbench.virtdata.core.bindings.ContextualBindingsArrayTemplate;
+import io.stargate.proto.QueryOuterClass;
 import io.stargate.proto.QueryOuterClass.Consistency;
 import io.stargate.proto.QueryOuterClass.Values;
+import io.stargate.proto.ReactorStargateGrpc;
 import io.stargate.proto.StargateGrpc;
 import io.stargate.proto.StargateGrpc.StargateFutureStub;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import reactor.core.Disposable;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 @SuppressWarnings("Duplicates")
 public class StargateActivity extends SimpleActivity implements Activity, ActivityDefObserver {
@@ -48,6 +58,11 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
     private OpSequence<Request> opsequence;
 
     private ConcurrentHashMap<StargateActionException, ExceptionMetaData> exceptionInfo = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<ReactiveStargateActionException, ExceptionMetaData> reactiveExceptionInfo = new ConcurrentHashMap<>();
+
+    // stores reactive state per nb thread
+    private static final ThreadLocal<ReactiveState> REACTIVE_STATE_PER_THREAD = new ThreadLocal<>();
+
     public static final long MILLIS_BETWEEN_SIMILAR_ERROR = 1000 * 60 * 5; // 5 minutes
     private final ExceptionCountMetrics exceptionCountMetrics;
     private final ExceptionHistoMetrics exceptionHistoMetrics;
@@ -59,7 +74,7 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
     private long requestDeadlineMs;
     private Integer numberOfConcurrentClients;
 
-    private static final StubCache<StargateFutureStub> stubCache = new StubCache<>();
+    private static final StubCache stubCache = new StubCache();
 
 
     public StargateActivity(ActivityDef activityDef) {
@@ -71,6 +86,30 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
 
     public StargateFutureStub getStub() {
         return stubCache.get();
+    }
+
+    public ReactiveState executeQueryReactive(QueryOuterClass.Query query) {
+        // if the given nb thread did not start reactive bi_streaming yet:
+        if(REACTIVE_STATE_PER_THREAD.get() == null){
+            ReactorStargateGrpc.ReactorStargateStub reactorStub = stubCache.getReactorStub();
+            ReactiveState reactiveState = new ReactiveState(reactorStub);
+            REACTIVE_STATE_PER_THREAD.set(reactiveState);
+            execute(query, reactiveState);
+            logger.debug("return created reactiveState: " + reactiveState);
+            return reactiveState;
+        } else{
+            // bi_streaming was already started
+            logger.debug("Returning reactiveState existing {} ", REACTIVE_STATE_PER_THREAD.get());
+            ReactiveState reactiveState = REACTIVE_STATE_PER_THREAD.get();
+            execute(query, reactiveState);
+            return reactiveState;
+        }
+    }
+
+    private void execute(QueryOuterClass.Query query, ReactiveState reactiveState) {
+        reactiveState.startTimeRef.set(System.nanoTime());
+        reactiveState.onQuery(query);
+        reactiveState.completionRef.set(new CompletableFuture<>());
     }
 
     @Override
@@ -86,6 +125,11 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
     public ConcurrentHashMap<StargateActionException, ExceptionMetaData> getExceptionInfo() {
         return exceptionInfo;
     }
+
+    public ConcurrentHashMap<ReactiveStargateActionException, ExceptionMetaData> getReactiveExceptionInfo() {
+        return reactiveExceptionInfo;
+    }
+
 
     private void initSequencer() {
         SequencerType sequencerType = SequencerType.valueOf(
@@ -166,7 +210,10 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
     }
 
     private void initializeGrpcStubs(Integer numberOfConcurrentClients) {
-        stubCache.build(activityDef, StargateGrpc::newFutureStub, numberOfConcurrentClients);
+        stubCache.build(activityDef,
+            StargateGrpc::newFutureStub,
+            ReactorStargateGrpc::newReactorStub,
+            numberOfConcurrentClients);
     }
 
     public int getMaxPages() {
@@ -317,4 +364,81 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
         return unfiltered;
     }
 
+
+    public static class ReactiveState {
+        NewQueryListener listener;
+        private final Flux<QueryOuterClass.StreamingResponse> responseFlux;
+        private Disposable subscription;
+        private final AtomicReference<CompletableFuture<Integer>> completionRef = new AtomicReference<>();
+        private final AtomicReference<Timer.Context> resultTimeRef = new AtomicReference<>();
+        private final AtomicReference<Long> startTimeRef = new AtomicReference<>();
+
+        public ReactiveState(ReactorStargateGrpc.ReactorStargateStub reactorStargateStub) {
+            // create new Query flux and register the NewQueryListener.
+            // The listener will be used to propagate Queries via bi_directional streaming.
+            Flux<QueryOuterClass.Query> queryFlux = Flux.create((Consumer<FluxSink<QueryOuterClass.Query>>) sink -> registerListener(
+                new NewQueryListener(sink)
+            )).onErrorContinue((e, v) -> {
+                logger.warn("Error in the Query flux, it will continue processing.", e);
+            });
+            this.responseFlux = reactorStargateStub.executeQueryStream(queryFlux);
+        }
+
+        public void registerListener(NewQueryListener newQueryListener){
+            logger.debug("registering new listener: {}",newQueryListener);
+            listener = newQueryListener;
+        }
+
+        public void onQuery(QueryOuterClass.Query q)  {
+            listener.onQuery(q);
+        }
+
+
+        public Flux<QueryOuterClass.StreamingResponse> getResponseFlux() {
+            return responseFlux;
+        }
+
+        public void setSubscription(Disposable subscription) {
+            if(this.subscription != null){
+                throw new IllegalStateException("Only one subscription is allowed");
+            }
+            this.subscription = subscription;
+        }
+
+        public boolean isSubscriptionCreated() {
+            return subscription!=null;
+        }
+
+        public void setResultTimer(Timer.Context time) {
+            resultTimeRef.set(time);
+        }
+
+        public void complete(int responseCode) {
+            completionRef.get().complete(responseCode);
+        }
+
+        public boolean isDone() {
+            return completionRef.get().isDone();
+        }
+
+        public CompletableFuture<Integer> getCompletion() {
+            return completionRef.get();
+        }
+
+        public void clearResultSetTimer() {
+            resultTimeRef.set(null);
+        }
+
+        public long stopResultSetTimer() {
+            if(resultTimeRef.get() != null) {
+                return resultTimeRef.get().stop();
+            } else {
+                return 0;
+            }
+        }
+
+        public long getStartTime() {
+            return startTimeRef.get();
+        }
+    }
 }
