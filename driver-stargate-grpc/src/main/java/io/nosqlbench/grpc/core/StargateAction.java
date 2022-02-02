@@ -196,7 +196,7 @@ public class StargateAction implements SyncAction, MultiPhaseAction, ActivityDef
 
         try {
             logger.debug("waiting for completion: {} from Thread: {}", reactiveState.getCompletion(),Thread.currentThread().getName());
-            Integer result = reactiveState.getCompletion().get(10, TimeUnit.SECONDS);
+            Integer result = reactiveState.getCompletion().get(5, TimeUnit.SECONDS);
             triesHisto.update(1);
             return result;
         } catch (InterruptedException | ExecutionException | TimeoutException e) {
