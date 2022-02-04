@@ -1,6 +1,7 @@
 package io.nosqlbench.grpc.core;
 
 import com.codahale.metrics.Timer;
+import io.grpc.Deadline;
 import io.nosqlbench.activitytype.cql.statements.core.AvailableCQLStatements;
 import io.nosqlbench.activitytype.cql.statements.core.CQLStatementDef;
 import io.nosqlbench.activitytype.cql.statements.core.TaggedCQLStatementDefs;
@@ -48,6 +49,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -91,7 +93,11 @@ public class StargateActivity extends SimpleActivity implements Activity, Activi
     public ReactiveState executeQueryReactive(QueryOuterClass.Query query) {
         // if the given nb thread did not start reactive bi_streaming yet:
         if(REACTIVE_STATE_PER_THREAD.get() == null){
-            ReactorStargateGrpc.ReactorStargateStub reactorStub = stubCache.getReactorStub();
+            ReactorStargateGrpc.ReactorStargateStub reactorStub =
+                stubCache.getReactorStub().withDeadline(Deadline
+                    .after(requestDeadlineMs, TimeUnit.MILLISECONDS));
+
+
             ReactiveState reactiveState = new ReactiveState(reactorStub);
             REACTIVE_STATE_PER_THREAD.set(reactiveState);
             execute(query, reactiveState);
